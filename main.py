@@ -666,7 +666,7 @@ HTML = """
         }
         
         // ============================================
-        // ATUALIZAÇÃO DO GRÁFICO
+        // ATUALIZAÇÃO DO GRÁFICO - CORRIGIDO
         // ============================================
         function updateBars() {
             for(let i = 0; i <= 9; i++) {
@@ -680,6 +680,7 @@ HTML = """
                 bar.style.height = height + '%';
                 percentEl.innerHTML = percent.toFixed(1) + '%';
                 
+                // Destacar o dígito alvo (se existir) - mas NÃO CONGELA O VALOR
                 if(i === botState.targetDigit) {
                     bar.classList.add('target');
                 } else {
@@ -751,7 +752,6 @@ HTML = """
                     connectionAttempts = 0;
                     addLog('✅ WebSocket conectado', 'success');
                     
-                    // Enviar autorização
                     ws.send(JSON.stringify({
                         authorize: botState.token
                     }));
@@ -771,7 +771,6 @@ HTML = """
                         updateConnectionStatus('connected');
                         addLog('✅ Autorizado com sucesso!', 'success');
                         
-                        // Inscrever para ticks
                         ws.send(JSON.stringify({
                             ticks: SYMBOL,
                             subscribe: 1
@@ -788,16 +787,13 @@ HTML = """
                         
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
-                        // Adicionar ao histórico
                         botState.tickHistory.push(digit);
                         if(botState.tickHistory.length > 25) {
                             botState.tickHistory.shift();
                         }
                         
-                        // Calcular frequências e atualizar barras
                         calculateFrequencies();
                         
-                        // Executar estratégia se estiver ativa
                         if(botState.running && botState.analysisStarted) {
                             executeStrategy(digit);
                         }
@@ -816,7 +812,6 @@ HTML = """
                     botState.connected = false;
                     updateConnectionStatus('disconnected');
                     
-                    // Código 1000 é fechamento normal, não reconectar
                     if(event.code !== 1000) {
                         addLog(`❌ Conexão fechada (código ${event.code}). Reconectando em 5s...`, 'error');
                         handleReconnect();
@@ -846,9 +841,6 @@ HTML = """
             }
         }
         
-        // ============================================
-        // HEARTBEAT
-        // ============================================
         function startHeartbeat() {
             if(heartbeatInterval) clearInterval(heartbeatInterval);
             
@@ -859,9 +851,6 @@ HTML = """
             }, 30000);
         }
         
-        // ============================================
-        // ATUALIZAR STATUS
-        // ============================================
         function updateConnectionStatus(status) {
             let badge = document.getElementById('statusBadge');
             let text = document.getElementById('statusText');
@@ -883,9 +872,6 @@ HTML = """
             }
         }
         
-        // ============================================
-        // CALCULAR FREQUÊNCIAS
-        // ============================================
         function calculateFrequencies() {
             if(botState.tickHistory.length === 0) return;
             
@@ -905,14 +891,9 @@ HTML = """
             updateBars();
         }
         
-        // ============================================
-        // ESTRATÉGIA PRINCIPAL
-        // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Encontrar dígito com 0%
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 
-                // Verificar se existe algum dígito com 0%
                 let zeroDigit = null;
                 for(let i = 0; i <= 9; i++) {
                     if(botState.frequencies[i] < 0.5) {
@@ -935,7 +916,6 @@ HTML = """
                 }
             }
             
-            // PASSO 2: Aguardar atingir 8%
             if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered) {
                 let currentPercent = botState.frequencies[botState.targetDigit];
                 document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${currentPercent.toFixed(1)}%)`;
@@ -960,19 +940,33 @@ HTML = """
                 }
             }
             
-            // PASSO 4 & 5: Verificar resultado
             if(botState.inPosition && botState.targetDigit !== null) {
                 if(lastDigit === botState.targetDigit) {
-                    // GANHOU
                     let profit = botState.stats.currentStake * 0.95;
                     botState.stats.profit += profit;
                     
                     addLog(`💰 VENDA! Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
                     
-                    resetAfterTrade(true);
+                    botState.inPosition = false;
+                    botState.targetDigit = null;
+                    botState.entryTriggered = false;
+                    botState.stats.currentStake = botState.config.stake;
+                    botState.stats.galeCount = 0;
+                    
+                    document.getElementById('predictionDigit').innerHTML = '-';
+                    document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
+                    document.getElementById('targetInfo').style.display = 'none';
+                    
+                    updateStats();
+                    
+                    addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
+                    
+                    setTimeout(() => {
+                        botState.waitingCompletion = false;
+                        addLog('✅ Pronto para nova análise', 'success');
+                    }, 5000);
                     
                 } else {
-                    // PERDEU
                     let loss = -botState.stats.currentStake;
                     botState.stats.profit += loss;
                     
@@ -994,29 +988,6 @@ HTML = """
                     
                     updateStats();
                 }
-            }
-        }
-        
-        function resetAfterTrade(won) {
-            if(won) {
-                botState.inPosition = false;
-                botState.targetDigit = null;
-                botState.entryTriggered = false;
-                botState.stats.currentStake = botState.config.stake;
-                botState.stats.galeCount = 0;
-                
-                document.getElementById('predictionDigit').innerHTML = '-';
-                document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
-                document.getElementById('targetInfo').style.display = 'none';
-                
-                updateStats();
-                
-                addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
-                
-                setTimeout(() => {
-                    botState.waitingCompletion = false;
-                    addLog('✅ Pronto para nova análise', 'success');
-                }, 5000);
             }
         }
         
