@@ -463,6 +463,18 @@ HTML = """
             color: #8888a0;
             display: none;
         }
+        .freq-table {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 5px;
+            margin-top: 5px;
+        }
+        .freq-item {
+            background: #0f0f14;
+            padding: 3px;
+            text-align: center;
+            border-radius: 3px;
+        }
     </style>
 </head>
 <body>
@@ -527,9 +539,11 @@ HTML = """
                 </div>
                 
                 <div class="debug-info" id="debugInfo">
-                    <div>Ticks recebidos: <span id="tickCount">0</span></div>
-                    <div>Último dígito: <span id="lastDigit">-</span></div>
-                    <div>Histórico: <span id="tickHistory">[]</span></div>
+                    <div><strong>Ticks recebidos:</strong> <span id="tickCount">0</span>/25</div>
+                    <div><strong>Último dígito:</strong> <span id="lastDigit">-</span></div>
+                    <div><strong>Histórico:</strong> <span id="tickHistory">[]</span></div>
+                    <div><strong>Frequências:</strong></div>
+                    <div class="freq-table" id="freqTable"></div>
                 </div>
             </div>
             
@@ -696,6 +710,13 @@ HTML = """
                 document.getElementById('lastDigit').innerHTML = botState.tickHistory[botState.tickHistory.length - 1];
             }
             document.getElementById('tickHistory').innerHTML = '[' + botState.tickHistory.join(', ') + ']';
+            
+            // Atualizar tabela de frequências
+            let freqHtml = '';
+            for(let i = 0; i <= 9; i++) {
+                freqHtml += `<div class="freq-item"><strong>${i}:</strong> ${botState.frequencies[i].toFixed(1)}%</div>`;
+            }
+            document.getElementById('freqTable').innerHTML = freqHtml;
         }
         
         // ============================================
@@ -819,16 +840,10 @@ HTML = """
                         
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
-                        // LOG DO TICK RECEBIDO
-                        addLog(`📊 Tick recebido: $${price.toFixed(2)} | Dígito: ${digit}`, 'info');
-                        
                         botState.tickHistory.push(digit);
                         if(botState.tickHistory.length > 25) {
                             botState.tickHistory.shift();
                         }
-                        
-                        // LOG DO HISTÓRICO
-                        addLog(`📈 Histórico (${botState.tickHistory.length}/25): [${botState.tickHistory.join(', ')}]`, 'info');
                         
                         calculateFrequencies();
                         updateDebug();
@@ -845,7 +860,6 @@ HTML = """
                 
                 ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
-                    addLog('❌ Erro no WebSocket', 'error');
                 };
                 
                 ws.onclose = (event) => {
@@ -928,7 +942,7 @@ HTML = """
                 botState.frequencies[i] = (counts[i] / total) * 100;
             }
             
-            // LOG DAS FREQUÊNCIAS
+            // Log das frequências de forma organizada
             let freqStr = '';
             for(let i = 0; i <= 9; i++) {
                 freqStr += `${i}:${botState.frequencies[i].toFixed(1)}% `;
