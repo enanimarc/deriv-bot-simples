@@ -589,10 +589,10 @@ HTML = """
     
     <script>
         // ============================================
-        // CONFIGURAÇÃO DERIV API - ENDPOINT CORRETO
+        // CONFIGURAÇÃO DERIV API
         // ============================================
-        const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=1089'; // Endpoint oficial [citation:8][citation:10]
-        const SYMBOL = 'R_100'; // Volatility 100 Index
+        const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
+        const SYMBOL = 'R_100';
         
         // ============================================
         // ESTADO DO BOT
@@ -608,6 +608,7 @@ HTML = """
             inPosition: false,
             waitingCompletion: false,
             entryTriggered: false,
+            hasCollected25Ticks: false, // NOVO: só começa estratégia após 25 ticks
             tickHistory: [],
             frequencies: Array(10).fill(0),
             stats: {
@@ -655,7 +656,6 @@ HTML = """
             logsDiv.appendChild(entry);
             logsDiv.scrollTop = logsDiv.scrollHeight;
             
-            // Manter apenas últimas 50 mensagens
             while(logsDiv.children.length > 50) {
                 logsDiv.removeChild(logsDiv.firstChild);
             }
@@ -670,14 +670,12 @@ HTML = """
                 let percentEl = document.getElementById(`percent-${i}`);
                 let percent = botState.frequencies[i] || 0;
                 
-                // Calcular altura proporcional (máx 100% = 20% do gráfico)
                 let height = (percent / 20) * 100;
                 if(height > 100) height = 100;
                 
                 bar.style.height = height + '%';
                 percentEl.innerHTML = percent.toFixed(1) + '%';
                 
-                // Destacar barra alvo
                 if(i === botState.targetDigit) {
                     bar.classList.add('target');
                 } else {
@@ -701,14 +699,9 @@ HTML = """
         // FUNÇÃO PARA EXTRAIR O ÚLTIMO DÍGITO DO PREÇO
         // ============================================
         function getLastDigit(price) {
-            // Garantir que price é número
             let priceStr = price.toString();
-            
-            // Remover ponto decimal e pegar último caractere
             priceStr = priceStr.replace('.', '');
             let lastDigit = parseInt(priceStr[priceStr.length - 1]);
-            
-            // Garantir que é um número válido (0-9)
             return isNaN(lastDigit) ? 0 : lastDigit;
         }
         
@@ -726,17 +719,14 @@ HTML = """
             updateConnectionStatus('connecting');
             addLog('🔄 Conectando à Deriv...', 'info');
             
-            // Fechar conexão anterior se existir
             if(ws) {
                 ws.close();
                 ws = null;
             }
             
             try {
-                // Criar nova conexão WebSocket - endpoint oficial da Deriv [citation:8][citation:10]
                 ws = new WebSocket(DERIV_WS_URL);
                 
-                // Timeout para conexão
                 let connectionTimeout = setTimeout(() => {
                     if(ws && ws.readyState !== WebSocket.OPEN) {
                         ws.close();
@@ -745,22 +735,18 @@ HTML = """
                     }
                 }, 10000);
                 
-                // Evento: Conexão aberta
                 ws.onopen = () => {
                     clearTimeout(connectionTimeout);
                     addLog('✅ WebSocket conectado', 'success');
                     
-                    // Enviar autorização com token
                     ws.send(JSON.stringify({
                         authorize: token
                     }));
                 };
                 
-                // Evento: Mensagem recebida
                 ws.onmessage = (event) => {
                     let data = JSON.parse(event.data);
                     
-                    // Resposta de autorização
                     if(data.msg_type === 'authorize') {
                         if(data.error) {
                             updateConnectionStatus('disconnected');
@@ -768,67 +754,68 @@ HTML = """
                             return;
                         }
                         
-                        // Autorizado com sucesso
                         botState.connected = true;
                         updateConnectionStatus('connected');
                         addLog('✅ Autorizado com sucesso!', 'success');
                         
-                        // Inscrever para ticks do R_100 [citation:1][citation:10]
                         ws.send(JSON.stringify({
                             ticks: SYMBOL,
                             subscribe: 1
                         }));
                         addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
                         
-                        // Iniciar heartbeat para manter conexão viva
                         startHeartbeat();
                     }
                     
-                    // Resposta de tick
                     if(data.msg_type === 'tick' && data.tick) {
                         let tick = data.tick;
                         let price = tick.quote;
                         let digit = getLastDigit(price);
                         
-                        // Atualizar preço na interface
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
                         // Adicionar ao histórico
                         botState.tickHistory.push(digit);
+                        
+                        // Só manter últimos 25 ticks
                         if(botState.tickHistory.length > 25) {
                             botState.tickHistory.shift();
                         }
                         
-                        // Calcular frequências a cada novo tick
+                        // Calcular frequências
                         calculateFrequencies();
                         
-                        // Executar estratégia se o bot estiver rodando
-                        if(botState.running) {
-                            executeStrategy(digit);
+                        // Só começar estratégia quando tiver 25 ticks
+                        if(botState.tickHistory.length === 25) {
+                            if(!botState.hasCollected25Ticks) {
+                                botState.hasCollected25Ticks = true;
+                                addLog('📊 25 ticks coletados - Gráfico estabilizado', 'success');
+                            }
+                            
+                            if(botState.running) {
+                                executeStrategy(digit);
+                            }
                         }
                     }
                     
-                    // Resposta de ping/pong para manter conexão
                     if(data.msg_type === 'ping') {
                         ws.send(JSON.stringify({ pong: data.ping }));
                     }
                 };
                 
-                // Evento: Erro na conexão
                 ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
                     addLog('❌ Erro na conexão', 'error');
                 };
                 
-                // Evento: Conexão fechada
                 ws.onclose = (event) => {
                     botState.connected = false;
+                    botState.hasCollected25Ticks = false; // Reset ao desconectar
                     updateConnectionStatus('disconnected');
                     
-                    if(event.code !== 1000) { // 1000 = fechamento normal
+                    if(event.code !== 1000) {
                         addLog(`❌ Conexão fechada (código ${event.code}). Reconectando em 5s...`, 'error');
                         
-                        // Tentar reconectar automaticamente [citation:6]
                         if(reconnectTimer) clearTimeout(reconnectTimer);
                         reconnectTimer = setTimeout(() => {
                             if(!botState.connected && botState.token) {
@@ -848,21 +835,20 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÃO PARA MANTER CONEXÃO VIVA
+        // HEARTBEAT
         // ============================================
         function startHeartbeat() {
             if(heartbeatInterval) clearInterval(heartbeatInterval);
             
             heartbeatInterval = setInterval(() => {
                 if(ws && ws.readyState === WebSocket.OPEN) {
-                    // Enviar ping para manter conexão [citation:8]
                     ws.send(JSON.stringify({ ping: 1 }));
                 }
-            }, 30000); // A cada 30 segundos
+            }, 30000);
         }
         
         // ============================================
-        // ATUALIZAR STATUS DE CONEXÃO NA INTERFACE
+        // ATUALIZAR STATUS
         // ============================================
         function updateConnectionStatus(status) {
             let badge = document.getElementById('statusBadge');
@@ -886,48 +872,60 @@ HTML = """
         }
         
         // ============================================
-        // CALCULAR FREQUÊNCIAS DOS DÍGITOS
+        // CALCULAR FREQUÊNCIAS
         // ============================================
         function calculateFrequencies() {
             if(botState.tickHistory.length === 0) return;
             
             let counts = Array(10).fill(0);
             
-            // Contar ocorrências de cada dígito
             botState.tickHistory.forEach(digit => {
                 counts[digit]++;
             });
             
-            // Calcular percentuais
             let total = botState.tickHistory.length;
             for(let i = 0; i <= 9; i++) {
                 botState.frequencies[i] = (counts[i] / total) * 100;
             }
             
-            // Atualizar barras
             updateBars();
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL
+        // ESTRATÉGIA PRINCIPAL - CORRIGIDA
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Encontrar dígito com 0% (se não tiver alvo)
+            // Só executar estratégia se já tiver 25 ticks
+            if(botState.tickHistory.length < 25) return;
+            
+            // PASSO 1: Encontrar dígito com 0% (apenas se não estiver em posição)
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
+                let zeroDigits = [];
+                
+                // Primeiro, encontrar todos os dígitos com percentual muito baixo
                 for(let i = 0; i <= 9; i++) {
-                    if(botState.frequencies[i] < 0.5) { // Aproximadamente 0%
-                        botState.targetDigit = i;
-                        botState.waitingCompletion = true;
-                        botState.stats.galeCount = 0;
-                        
-                        document.getElementById('predictionDigit').innerHTML = i;
-                        document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${botState.frequencies[i].toFixed(1)}%)`;
-                        document.getElementById('targetInfo').style.display = 'block';
-                        document.getElementById('targetInfo').innerHTML = `🎯 Dígito ${i} (${botState.frequencies[i].toFixed(1)}%) - Aguardando 8%`;
-                        
-                        addLog(`🎯 Dígito alvo: ${i} (${botState.frequencies[i].toFixed(1)}%)`, 'warning');
-                        break;
+                    if(botState.frequencies[i] < 1.0) { // Menos de 1% é considerado 0%
+                        zeroDigits.push(i);
                     }
+                }
+                
+                // Se houver múltiplos dígitos com 0%, escolher o que tem menor percentual
+                if(zeroDigits.length > 0) {
+                    // Escolher o dígito com menor percentual
+                    let chosenDigit = zeroDigits.reduce((min, d) => 
+                        botState.frequencies[d] < botState.frequencies[min] ? d : min
+                    , zeroDigits[0]);
+                    
+                    botState.targetDigit = chosenDigit;
+                    botState.waitingCompletion = true;
+                    botState.stats.galeCount = 0;
+                    
+                    document.getElementById('predictionDigit').innerHTML = chosenDigit;
+                    document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${botState.frequencies[chosenDigit].toFixed(1)}%)`;
+                    document.getElementById('targetInfo').style.display = 'block';
+                    document.getElementById('targetInfo').innerHTML = `🎯 Dígito alvo: ${chosenDigit} (${botState.frequencies[chosenDigit].toFixed(1)}%) - Aguardando 8%`;
+                    
+                    addLog(`🎯 Dígito alvo: ${chosenDigit} (${botState.frequencies[chosenDigit].toFixed(1)}%)`, 'warning');
                 }
             }
             
@@ -935,6 +933,7 @@ HTML = """
             if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered) {
                 let currentPercent = botState.frequencies[botState.targetDigit];
                 document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${currentPercent.toFixed(1)}%)`;
+                document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit}: ${currentPercent.toFixed(1)}% - Aguardando 8%`;
                 
                 if(currentPercent >= 8) {
                     botState.entryTriggered = true;
@@ -952,18 +951,14 @@ HTML = """
                         botState.stats.galeCount++;
                         addLog(`✅ COMPRA ${botState.stats.galeCount}: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
                         
-                        // PASSO 4: Aguardar resultado (simulado, na prática será resolvido no próximo tick real)
-                        // O resultado será processado na próxima chamada de executeStrategy
-                        
                     }, 100);
                 }
             }
             
-            // PASSO 4 & 5: Verificar resultado (se está em posição)
+            // PASSO 4 & 5: Verificar resultado
             if(botState.inPosition && botState.targetDigit !== null) {
-                // Verificar se o dígito atual é o alvo
                 if(lastDigit === botState.targetDigit) {
-                    // PASSO 6: GANHOU - Vender
+                    // PASSO 6: GANHOU
                     let profit = botState.stats.currentStake * 0.95;
                     botState.stats.profit += profit;
                     
@@ -973,7 +968,7 @@ HTML = """
                     resetAfterTrade(true);
                     
                 } else {
-                    // PASSO 5: PERDEU - Aplicar martingale
+                    // PASSO 5: PERDEU
                     let loss = -botState.stats.currentStake;
                     botState.stats.profit += loss;
                     
@@ -1059,7 +1054,13 @@ HTML = """
                 if(timeLeft < 0) {
                     clearInterval(countdownInterval);
                     document.getElementById('startCounter').innerHTML = 'Ativo';
-                    addLog('✅ Robô ativo - Analisando mercado...', 'success');
+                    
+                    // Se ainda não tem 25 ticks, avisar
+                    if(botState.tickHistory.length < 25) {
+                        addLog(`⏳ Aguardando coletar 25 ticks... (${botState.tickHistory.length}/25)`, 'info');
+                    } else {
+                        addLog('✅ Robô ativo - Analisando mercado...', 'success');
+                    }
                 }
             }, 1000);
         }
@@ -1075,7 +1076,7 @@ HTML = """
             if(reconnectTimer) clearTimeout(reconnectTimer);
             
             if(ws) {
-                ws.close(1000, "Bot parado"); // Fechamento normal
+                ws.close(1000, "Bot parado");
                 ws = null;
             }
             
