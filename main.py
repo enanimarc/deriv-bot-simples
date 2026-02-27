@@ -458,7 +458,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Aguarda 30s para estabilizar → Analisa 0% → Aguarda 8% → Compra → Martingale até acertar</p>
+            <p>Aguarda 30s → Encontra o dígito com 0% → Aguarda 8% → Compra → Martingale até acertar</p>
         </div>
         
         <div class="market-bar">
@@ -608,7 +608,7 @@ HTML = """
             inPosition: false,
             waitingCompletion: false,
             entryTriggered: false,
-            analysisStarted: false, // Controle para iniciar análise após 30s
+            analysisStarted: false,
             tickHistory: [],
             frequencies: Array(10).fill(0),
             stats: {
@@ -775,16 +775,16 @@ HTML = """
                         
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
-                        // Adicionar ao histórico (sempre manter últimos 25)
+                        // Adicionar ao histórico
                         botState.tickHistory.push(digit);
                         if(botState.tickHistory.length > 25) {
                             botState.tickHistory.shift();
                         }
                         
-                        // Calcular frequências (sempre calcula para o gráfico)
+                        // Calcular frequências
                         calculateFrequencies();
                         
-                        // Só executar estratégia se a análise já começou (após 30s)
+                        // Só executar estratégia após 30s
                         if(botState.running && botState.analysisStarted) {
                             executeStrategy(digit);
                         }
@@ -802,7 +802,7 @@ HTML = """
                 
                 ws.onclose = (event) => {
                     botState.connected = false;
-                    botState.analysisStarted = false; // Reset ao desconectar
+                    botState.analysisStarted = false;
                     updateConnectionStatus('disconnected');
                     
                     if(event.code !== 1000) {
@@ -885,49 +885,37 @@ HTML = """
         
         // ============================================
         // ESTRATÉGIA PRINCIPAL - CORRIGIDA
+        // ENCONTRA EXATAMENTE 0%
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Encontrar dígito com 0% (apenas quando não tem alvo)
+            // PASSO 1: Encontrar dígito com 0% (exatamente zero)
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 
-                // IMPORTANTE: Só considerar dígitos que realmente existem no histórico
-                // Ignorar quando todos estão zerados (início)
-                let hasValidData = false;
+                // IMPORTANTE: Só procura quando já tem 25 ticks
+                if(botState.tickHistory.length < 25) return;
+                
+                // Verificar se existe algum dígito com EXATAMENTE 0%
+                let zeroDigit = null;
                 for(let i = 0; i <= 9; i++) {
-                    if(botState.frequencies[i] > 0) {
-                        hasValidData = true;
+                    // Considera 0% se for menor que 0.1% (praticamente zero)
+                    if(botState.frequencies[i] < 0.1) {
+                        zeroDigit = i;
                         break;
                     }
                 }
                 
-                if(!hasValidData) return; // Ainda não tem dados válidos
-                
-                // Encontrar TODOS os dígitos com percentual próximo de 0
-                let candidates = [];
-                for(let i = 0; i <= 9; i++) {
-                    // Considera 0% se for menor que 2% (para evitar dígitos que acabaram de aparecer)
-                    if(botState.frequencies[i] < 2.0) {
-                        candidates.push(i);
-                    }
-                }
-                
-                // Se encontrou candidatos, escolher um (preferência pelo que tem MENOS ocorrências)
-                if(candidates.length > 0) {
-                    // Escolher o dígito com menor percentual entre os candidatos
-                    let chosenDigit = candidates.reduce((min, d) => 
-                        botState.frequencies[d] < botState.frequencies[min] ? d : min
-                    , candidates[0]);
-                    
-                    botState.targetDigit = chosenDigit;
+                // Se encontrou um dígito com 0%
+                if(zeroDigit !== null) {
+                    botState.targetDigit = zeroDigit;
                     botState.waitingCompletion = true;
                     botState.stats.galeCount = 0;
                     
-                    document.getElementById('predictionDigit').innerHTML = chosenDigit;
-                    document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${botState.frequencies[chosenDigit].toFixed(1)}%)`;
+                    document.getElementById('predictionDigit').innerHTML = zeroDigit;
+                    document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${botState.frequencies[zeroDigit].toFixed(1)}%)`;
                     document.getElementById('targetInfo').style.display = 'block';
-                    document.getElementById('targetInfo').innerHTML = `🎯 Dígito alvo: ${chosenDigit} (${botState.frequencies[chosenDigit].toFixed(1)}%) - Aguardando 8%`;
+                    document.getElementById('targetInfo').innerHTML = `🎯 Dígito alvo: ${zeroDigit} (0%) - Aguardando 8%`;
                     
-                    addLog(`🎯 Dígito alvo: ${chosenDigit} (${botState.frequencies[chosenDigit].toFixed(1)}%)`, 'warning');
+                    addLog(`🎯 Dígito alvo: ${zeroDigit} (0%)`, 'warning');
                 }
             }
             
@@ -1035,7 +1023,7 @@ HTML = """
             }
             
             botState.running = true;
-            botState.analysisStarted = false; // Ainda não começou análise
+            botState.analysisStarted = false;
             botState.config = {
                 stake: parseFloat(document.getElementById('stake').value),
                 gale: parseFloat(document.getElementById('gale').value),
@@ -1110,5 +1098,4 @@ async def health():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-           
            
