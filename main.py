@@ -436,7 +436,7 @@ HTML = """
             padding: 16px 24px;
             font-family: monospace;
             font-size: 12px;
-            height: 120px;
+            height: 150px;
             overflow-y: auto;
             color: #e0e0e0;
         }
@@ -600,6 +600,9 @@ HTML = """
         let ws = null;
         let reconnectTimer = null;
         let heartbeatInterval = null;
+        let connectionAttempts = 0;
+        let maxReconnectAttempts = 5;
+        
         let botState = {
             running: false,
             connected: false,
@@ -663,7 +666,7 @@ HTML = """
         }
         
         // ============================================
-        // ATUALIZAÇÃO DO GRÁFICO - FUNCIONA SEMPRE
+        // ATUALIZAÇÃO DO GRÁFICO
         // ============================================
         function updateBars() {
             for(let i = 0; i <= 9; i++) {
@@ -677,7 +680,6 @@ HTML = """
                 bar.style.height = height + '%';
                 percentEl.innerHTML = percent.toFixed(1) + '%';
                 
-                // Destacar o dígito alvo (se existir)
                 if(i === botState.targetDigit) {
                     bar.classList.add('target');
                 } else {
@@ -708,7 +710,7 @@ HTML = """
         }
         
         // ============================================
-        // CONEXÃO DERIV COM RECONEXÃO AUTOMÁTICA
+        // CONEXÃO DERIV COM RECONEXÃO INTELIGENTE
         // ============================================
         function connectDeriv() {
             let token = document.getElementById('token').value;
@@ -718,11 +720,18 @@ HTML = """
             }
             
             botState.token = token;
+            connectionAttempts = 0;
+            establishConnection();
+        }
+        
+        function establishConnection() {
             updateConnectionStatus('connecting');
             addLog('🔄 Conectando à Deriv...', 'info');
             
             if(ws) {
-                ws.close();
+                try {
+                    ws.close(1000, "Reconectando");
+                } catch(e) {}
                 ws = null;
             }
             
@@ -731,18 +740,20 @@ HTML = """
                 
                 let connectionTimeout = setTimeout(() => {
                     if(ws && ws.readyState !== WebSocket.OPEN) {
-                        ws.close();
-                        updateConnectionStatus('disconnected');
                         addLog('❌ Timeout de conexão', 'error');
+                        ws.close();
+                        handleReconnect();
                     }
                 }, 10000);
                 
                 ws.onopen = () => {
                     clearTimeout(connectionTimeout);
+                    connectionAttempts = 0;
                     addLog('✅ WebSocket conectado', 'success');
                     
+                    // Enviar autorização
                     ws.send(JSON.stringify({
-                        authorize: token
+                        authorize: botState.token
                     }));
                 };
                 
@@ -760,6 +771,7 @@ HTML = """
                         updateConnectionStatus('connected');
                         addLog('✅ Autorizado com sucesso!', 'success');
                         
+                        // Inscrever para ticks
                         ws.send(JSON.stringify({
                             ticks: SYMBOL,
                             subscribe: 1
@@ -782,11 +794,10 @@ HTML = """
                             botState.tickHistory.shift();
                         }
                         
-                        // CALCULAR FREQUÊNCIAS E ATUALIZAR BARRAS IMEDIATAMENTE
-                        // Independente de qualquer condição
+                        // Calcular frequências e atualizar barras
                         calculateFrequencies();
                         
-                        // Só executar estratégia após 20s e se o bot estiver rodando
+                        // Executar estratégia se estiver ativa
                         if(botState.running && botState.analysisStarted) {
                             executeStrategy(digit);
                         }
@@ -799,32 +810,39 @@ HTML = """
                 
                 ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
-                    addLog('❌ Erro na conexão', 'error');
                 };
                 
                 ws.onclose = (event) => {
                     botState.connected = false;
-                    botState.analysisStarted = false;
                     updateConnectionStatus('disconnected');
                     
+                    // Código 1000 é fechamento normal, não reconectar
                     if(event.code !== 1000) {
                         addLog(`❌ Conexão fechada (código ${event.code}). Reconectando em 5s...`, 'error');
-                        
-                        if(reconnectTimer) clearTimeout(reconnectTimer);
-                        reconnectTimer = setTimeout(() => {
-                            if(!botState.connected && botState.token) {
-                                addLog('🔄 Tentando reconectar...', 'info');
-                                connectDeriv();
-                            }
-                        }, 5000);
+                        handleReconnect();
                     } else {
                         addLog('🔌 Conexão encerrada', 'info');
                     }
                 };
                 
             } catch(e) {
-                updateConnectionStatus('disconnected');
                 addLog('❌ Erro ao conectar: ' + e.message, 'error');
+                handleReconnect();
+            }
+        }
+        
+        function handleReconnect() {
+            connectionAttempts++;
+            
+            if(connectionAttempts <= maxReconnectAttempts) {
+                if(reconnectTimer) clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(() => {
+                    addLog(`🔄 Tentativa ${connectionAttempts}/${maxReconnectAttempts}...`, 'info');
+                    establishConnection();
+                }, 5000);
+            } else {
+                addLog('❌ Número máximo de tentativas atingido. Clique em CONECTAR para tentar novamente.', 'error');
+                updateConnectionStatus('disconnected');
             }
         }
         
@@ -866,14 +884,13 @@ HTML = """
         }
         
         // ============================================
-        // CALCULAR FREQUÊNCIAS E ATUALIZAR BARRAS
+        // CALCULAR FREQUÊNCIAS
         // ============================================
         function calculateFrequencies() {
             if(botState.tickHistory.length === 0) return;
             
             let counts = Array(10).fill(0);
             
-            // Contar ocorrências de cada dígito
             for(let i = 0; i < botState.tickHistory.length; i++) {
                 let digit = botState.tickHistory[i];
                 counts[digit]++;
@@ -881,36 +898,29 @@ HTML = """
             
             let total = botState.tickHistory.length;
             
-            // Calcular percentuais
             for(let i = 0; i <= 9; i++) {
                 botState.frequencies[i] = (counts[i] / total) * 100;
             }
             
-            // ATUALIZAR BARRAS - SEMPRE, SEM CONDIÇÕES
             updateBars();
-            
-            // Log para debug (opcional)
-            // console.log('Frequências atualizadas:', botState.frequencies.map(f => f.toFixed(1)).join(', '));
         }
         
         // ============================================
         // ESTRATÉGIA PRINCIPAL
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Encontrar dígito com 0% (exatamente zero)
+            // PASSO 1: Encontrar dígito com 0%
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 
-                // Verificar se existe algum dígito com EXATAMENTE 0%
+                // Verificar se existe algum dígito com 0%
                 let zeroDigit = null;
                 for(let i = 0; i <= 9; i++) {
-                    // Considera 0% se for menor que 0.1% (praticamente zero)
-                    if(botState.frequencies[i] < 0.1) {
+                    if(botState.frequencies[i] < 0.5) {
                         zeroDigit = i;
                         break;
                     }
                 }
                 
-                // Se encontrou um dígito com 0%
                 if(zeroDigit !== null) {
                     botState.targetDigit = zeroDigit;
                     botState.waitingCompletion = true;
@@ -939,7 +949,6 @@ HTML = """
                     
                     addLog(`📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Comprando...`, 'warning');
                     
-                    // PASSO 3: Comprar no próximo tick
                     setTimeout(() => {
                         if(!botState.running) return;
                         
@@ -954,36 +963,32 @@ HTML = """
             // PASSO 4 & 5: Verificar resultado
             if(botState.inPosition && botState.targetDigit !== null) {
                 if(lastDigit === botState.targetDigit) {
-                    // PASSO 6: GANHOU
+                    // GANHOU
                     let profit = botState.stats.currentStake * 0.95;
                     botState.stats.profit += profit;
                     
                     addLog(`💰 VENDA! Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
                     
-                    // Reset após vitória
                     resetAfterTrade(true);
                     
                 } else {
-                    // PASSO 5: PERDEU
+                    // PERDEU
                     let loss = -botState.stats.currentStake;
                     botState.stats.profit += loss;
                     
                     addLog(`❌ PERDEU! Dígito ${lastDigit} não saiu (alvo era ${botState.targetDigit})`, 'error');
                     
-                    // Verificar stop loss
                     if(botState.stats.profit <= -botState.config.stopLoss) {
                         addLog('🛑 STOP LOSS ATINGIDO!', 'error');
                         stopBot();
                         return;
                     }
                     
-                    // Aplicar gale para próxima tentativa
                     botState.stats.currentStake *= botState.config.gale;
                     botState.stats.galeCount++;
                     
                     addLog(`📈 GALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
                     
-                    // Reset para nova compra (mesmo alvo)
                     botState.inPosition = false;
                     botState.entryTriggered = false;
                     
@@ -992,9 +997,6 @@ HTML = """
             }
         }
         
-        // ============================================
-        // RESET APÓS TRADE BEM-SUCEDIDO
-        // ============================================
         function resetAfterTrade(won) {
             if(won) {
                 botState.inPosition = false;
@@ -1009,7 +1011,6 @@ HTML = """
                 
                 updateStats();
                 
-                // PASSO 7: Aguardar 5 segundos
                 addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
                 
                 setTimeout(() => {
@@ -1019,9 +1020,6 @@ HTML = """
             }
         }
         
-        // ============================================
-        // CONTROLE DO BOT
-        // ============================================
         function startBot() {
             if(!botState.connected) {
                 alert('Conecte-se à Deriv primeiro!');
@@ -1041,7 +1039,6 @@ HTML = """
             
             addLog('🚀 Iniciando robô... Aguardando 20 segundos para análise', 'warning');
             
-            // Timer de 20 segundos antes de começar análise
             if(analysisTimer) clearTimeout(analysisTimer);
             analysisTimer = setTimeout(() => {
                 botState.analysisStarted = true;
@@ -1049,7 +1046,6 @@ HTML = """
                 document.getElementById('predictionStatus').innerHTML = 'Analisando...';
             }, 20000);
             
-            // Contador regressivo visual
             let timeLeft = 20;
             if(countdownInterval) clearInterval(countdownInterval);
             
