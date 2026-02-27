@@ -156,25 +156,31 @@ HTML = """
             font-size: 13px;
         }
         
-        /* Chart Container - EXATAMENTE IGUAL DERIV */
+        /* GRÁFICO VERTICAL - IGUAL DERIV */
         .chart-wrapper {
             background: #0f0f14;
             border-radius: 12px;
             padding: 24px;
             border: 1px solid #2a2a35;
-            height: 600px;
+            height: 500px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 100%;
+            width: 100%;
             display: flex;
             flex-direction: column;
         }
         
-        .y-axis-labels {
+        .y-axis {
             display: flex;
             justify-content: space-between;
-            padding: 0 40px 0 60px;
+            padding: 0 10px 0 40px;
             margin-bottom: 8px;
         }
         
-        .y-label {
+        .y-axis span {
             color: #666680;
             font-size: 11px;
             width: 40px;
@@ -183,22 +189,20 @@ HTML = """
         
         .chart-area {
             flex: 1;
-            position: relative;
             display: flex;
-            margin-left: 40px;
+            position: relative;
         }
         
-        .y-axis {
+        .y-labels {
             width: 40px;
             height: 100%;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             padding: 4px 0;
-            position: relative;
         }
         
-        .y-axis span {
+        .y-labels span {
             color: #666680;
             font-size: 11px;
             text-align: right;
@@ -207,7 +211,7 @@ HTML = """
             line-height: 20px;
         }
         
-        .grid-container {
+        .grid-area {
             flex: 1;
             position: relative;
             height: 100%;
@@ -253,9 +257,6 @@ HTML = """
             left: 0;
             right: 0;
             height: 2px;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
         }
         
         .ref-20 {
@@ -274,73 +275,76 @@ HTML = """
         }
         
         .ref-label {
+            position: absolute;
+            right: 10px;
+            top: -10px;
             background: #1a1a24;
             color: white;
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 11px;
-            margin-right: 10px;
             border: 1px solid #2a2a35;
         }
         
+        /* BARRAS VERTICAIS */
         .bars-container {
             position: absolute;
-            top: 0;
+            bottom: 0;
             left: 0;
             right: 0;
-            bottom: 0;
+            height: 100%;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-around;
+            padding: 0 10px;
+            z-index: 5;
+        }
+        
+        .bar-wrapper {
             display: flex;
             flex-direction: column;
-            justify-content: space-around;
-            padding: 4px 0;
-        }
-        
-        .bar-row {
-            display: flex;
             align-items: center;
-            height: 9%;
-            position: relative;
-        }
-        
-        .bar-label {
-            width: 40px;
-            color: white;
-            font-size: 14px;
-            font-weight: 500;
-            text-align: right;
-            padding-right: 12px;
-        }
-        
-        .bar-track {
-            flex: 1;
-            height: 24px;
-            background: #1a1a24;
-            border-radius: 12px;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .bar-fill {
+            width: 8%;
             height: 100%;
-            background: linear-gradient(90deg, #ff6b6b 0%, #ff4444 100%);
-            border-radius: 12px;
-            transition: width 0.3s ease;
+            justify-content: flex-end;
             position: relative;
+        }
+        
+        .bar {
+            width: 100%;
+            background: linear-gradient(180deg, #ff6b6b 0%, #ff4444 100%);
+            border-radius: 4px 4px 0 0;
+            transition: height 0.3s ease;
+            min-height: 4px;
+            position: relative;
+            cursor: pointer;
+        }
+        
+        .bar.target {
+            background: linear-gradient(180deg, #ffaa00 0%, #ff8800 100%);
+            box-shadow: 0 0 20px rgba(255,170,0,0.5);
         }
         
         .bar-percent {
             position: absolute;
-            right: -50px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #ff4444;
-            font-size: 12px;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 11px;
             font-weight: 600;
             white-space: nowrap;
             background: #1a1a24;
             padding: 2px 6px;
             border-radius: 4px;
             border: 1px solid #2a2a35;
+        }
+        
+        .bar-label {
+            margin-top: 8px;
+            color: white;
+            font-size: 12px;
+            font-weight: 500;
         }
         
         /* Trading Panel */
@@ -732,10 +736,14 @@ HTML = """
                 <span class="market-label">Duração</span>
                 <span class="market-value">1 tick</span>
             </div>
+            <div class="market-item">
+                <span class="market-label">Preço Atual</span>
+                <span class="market-value" id="currentPrice">---</span>
+            </div>
         </div>
         
         <div class="main-grid">
-            <!-- Gráfico -->
+            <!-- GRÁFICO VERTICAL -->
             <div class="chart-panel">
                 <div class="chart-header">
                     <div class="chart-title">📊 Estatísticas dos Últimos 25 Dígitos</div>
@@ -754,18 +762,8 @@ HTML = """
                 </div>
                 
                 <div class="chart-wrapper">
-                    <!-- Y Axis Labels -->
-                    <div class="y-axis-labels">
-                        <span class="y-label">20%</span>
-                        <span class="y-label">16%</span>
-                        <span class="y-label">12%</span>
-                        <span class="y-label">8%</span>
-                        <span class="y-label">4%</span>
-                        <span class="y-label">0%</span>
-                    </div>
-                    
-                    <div class="chart-area">
-                        <!-- Y Axis -->
+                    <div class="chart-container">
+                        <!-- Eixo Y superior -->
                         <div class="y-axis">
                             <span>20%</span>
                             <span>16%</span>
@@ -775,33 +773,45 @@ HTML = """
                             <span>0%</span>
                         </div>
                         
-                        <!-- Grid Container -->
-                        <div class="grid-container">
-                            <!-- Grid Lines -->
-                            <div class="grid-lines">
-                                <div class="grid-line"><span>20%</span></div>
-                                <div class="grid-line"><span>16%</span></div>
-                                <div class="grid-line"><span>12%</span></div>
-                                <div class="grid-line"><span>8%</span></div>
-                                <div class="grid-line"><span>4%</span></div>
-                                <div class="grid-line"><span>0%</span></div>
+                        <div class="chart-area">
+                            <!-- Labels Y -->
+                            <div class="y-labels">
+                                <span>20%</span>
+                                <span>16%</span>
+                                <span>12%</span>
+                                <span>8%</span>
+                                <span>4%</span>
+                                <span>0%</span>
                             </div>
                             
-                            <!-- Reference Lines -->
-                            <div class="reference-lines">
-                                <div class="ref-line ref-20">
-                                    <span class="ref-label">20.00%</span>
+                            <!-- Grid Area -->
+                            <div class="grid-area">
+                                <!-- Grid Lines -->
+                                <div class="grid-lines">
+                                    <div class="grid-line"><span>20%</span></div>
+                                    <div class="grid-line"><span>16%</span></div>
+                                    <div class="grid-line"><span>12%</span></div>
+                                    <div class="grid-line"><span>8%</span></div>
+                                    <div class="grid-line"><span>4%</span></div>
+                                    <div class="grid-line"><span>0%</span></div>
                                 </div>
-                                <div class="ref-line ref-8">
-                                    <span class="ref-label">8.00%</span>
+                                
+                                <!-- Reference Lines -->
+                                <div class="reference-lines">
+                                    <div class="ref-line ref-20">
+                                        <span class="ref-label">20.00%</span>
+                                    </div>
+                                    <div class="ref-line ref-8">
+                                        <span class="ref-label">8.00%</span>
+                                    </div>
+                                    <div class="ref-line ref-4">
+                                        <span class="ref-label">4.00%</span>
+                                    </div>
                                 </div>
-                                <div class="ref-line ref-4">
-                                    <span class="ref-label">4.00%</span>
-                                </div>
+                                
+                                <!-- BARRAS VERTICAIS -->
+                                <div class="bars-container" id="barsContainer"></div>
                             </div>
-                            
-                            <!-- Bars -->
-                            <div class="bars-container" id="barsContainer"></div>
                         </div>
                     </div>
                 </div>
@@ -809,21 +819,9 @@ HTML = """
             
             <!-- Trading Panel -->
             <div class="trading-panel">
-                <!-- Current Price -->
-                <div class="price-display">
-                    <div class="price-label">Preço Atual</div>
-                    <div class="price-value" id="currentPrice">---</div>
-                </div>
-                
-                <!-- Trade Type -->
-                <div class="trade-type">
-                    <h3>Tipo de Trade</h3>
-                    <div class="type-active">Dígito Matches</div>
-                </div>
-                
                 <!-- Current Prediction -->
                 <div class="digit-prediction">
-                    <h3>Dígito da Previsão Atual</h3>
+                    <h3>DÍGITO DA PREVISÃO</h3>
                     <div class="prediction-box" id="predictionBox">
                         <div class="prediction-digit" id="predictionDigit">-</div>
                         <div class="prediction-label" id="predictionStatus">Aguardando análise...</div>
@@ -845,7 +843,7 @@ HTML = """
                 <!-- Profit/Loss Display -->
                 <div class="profit-display">
                     <div class="profit-row">
-                        <span class="profit-label">Lucro/Perda Total:</span>
+                        <span class="profit-label">Lucro/Perda:</span>
                         <span class="profit-value" id="totalProfit">$0.00</span>
                     </div>
                     <div class="profit-row" style="margin-top: 8px;">
@@ -957,13 +955,13 @@ HTML = """
                 losses: 0
             },
             targetDigit: null,
-            watchingDigit: null,
             inPosition: false,
             frequencies: {},
             lastDigits: [],
             predictionDigit: null,
             predictionStatus: 'Aguardando...',
-            entryTriggered: false
+            entryTriggered: false,
+            waitingForCompletion: false  // NOVO: aguarda ciclo completo
         };
         
         let tradingInterval = null;
@@ -971,20 +969,18 @@ HTML = """
         let cooldownInterval = null;
         let priceInterval = null;
         
-        // Inicializar barras
+        // Inicializar barras verticais
         function initBars() {
             let container = document.getElementById('barsContainer');
             let html = '';
             
             for(let i = 0; i <= 9; i++) {
                 html += `
-                    <div class="bar-row" id="bar-row-${i}">
-                        <div class="bar-label">${i}</div>
-                        <div class="bar-track">
-                            <div class="bar-fill" id="bar-${i}" style="width: 0%">
-                                <span class="bar-percent" id="percent-${i}">0.0%</span>
-                            </div>
+                    <div class="bar-wrapper" id="bar-wrapper-${i}">
+                        <div class="bar" id="bar-${i}">
+                            <span class="bar-percent" id="percent-${i}">0.0%</span>
                         </div>
+                        <div class="bar-label">${i}</div>
                     </div>
                 `;
             }
@@ -999,24 +995,24 @@ HTML = """
                 let bar = document.getElementById(`bar-${i}`);
                 let percentEl = document.getElementById(`percent-${i}`);
                 
-                // Largura máxima baseada no percentual
-                let width = (percent / 20) * 100;
-                if(width > 100) width = 100;
+                // Altura baseada no percentual (máx 100% = 20%)
+                let height = (percent / 20) * 100;
+                if(height > 100) height = 100;
                 
-                bar.style.width = width + '%';
+                bar.style.height = height + '%';
                 percentEl.innerHTML = percent.toFixed(1) + '%';
                 
-                // Cor da barra
+                // Destacar barra alvo
                 if(i === target) {
-                    bar.style.background = 'linear-gradient(90deg, #ffaa00 0%, #ff8800 100%)';
+                    bar.classList.add('target');
                 } else {
-                    bar.style.background = 'linear-gradient(90deg, #ff6b6b 0%, #ff4444 100%)';
+                    bar.classList.remove('target');
                 }
             }
         }
         
         function updatePrice() {
-            // Simular preço R_100 (entre 800 e 900)
+            // Simular preço R_100
             let price = (800 + Math.random() * 100).toFixed(2);
             document.getElementById('currentPrice').innerHTML = price;
         }
@@ -1049,8 +1045,8 @@ HTML = """
             document.getElementById('currentStake').innerHTML = '$' + botState.stats.currentStake.toFixed(2);
             document.getElementById('contractStake').innerHTML = botState.stats.currentStake.toFixed(2) + ' USD';
             
-            // Calcular payout (aproximado)
-            let payout = botState.stats.currentStake * (1 + 0.95 / botState.stats.currentStake);
+            // Calcular payout
+            let payout = botState.stats.currentStake * 8.34; // Aproximadamente 734% de retorno
             document.getElementById('contractPayout').innerHTML = payout.toFixed(2) + ' USD';
         }
         
@@ -1124,6 +1120,13 @@ HTML = """
             document.getElementById('cooldownCounter').innerHTML = '0s';
             document.getElementById('targetInfo').style.display = 'none';
             
+            // Reset prediction
+            botState.targetDigit = null;
+            botState.predictionDigit = null;
+            botState.waitingForCompletion = false;
+            document.getElementById('predictionDigit').innerHTML = '-';
+            document.getElementById('predictionStatus').innerHTML = 'Parado';
+            
             addLog('⏹️ Robô parado', 'error');
         }
         
@@ -1138,7 +1141,12 @@ HTML = """
                     return;
                 }
                 
-                // PASSO 1: Gerar dados dos últimos 25 ticks
+                // Se está aguardando completar ciclo, não faz nova análise
+                if(botState.waitingForCompletion) {
+                    return;
+                }
+                
+                // Gerar dados dos últimos 25 ticks
                 let freq = {};
                 let total = 0;
                 
@@ -1152,26 +1160,27 @@ HTML = """
                     freq[i] = (freq[i] / total) * 100;
                 }
                 
-                // PASSO 2: Identificar número da previsão (0%)
-                if(botState.targetDigit === null && !botState.inPosition) {
+                // PASSO 1: Identificar número da previsão (0%) - SÓ EXECUTA SE NÃO TEM DÍGITO ALVO
+                if(botState.targetDigit === null && !botState.inPosition && !botState.waitingForCompletion) {
                     for(let i = 0; i <= 9; i++) {
                         if(freq[i] < 0.5) {
                             botState.targetDigit = i;
                             botState.predictionDigit = i;
                             botState.entryTriggered = false;
+                            botState.waitingForCompletion = true; // AGUARDA CICLO COMPLETAR
                             
                             document.getElementById('predictionDigit').innerHTML = i;
                             document.getElementById('predictionStatus').innerHTML = 'Aguardando 8%';
                             document.getElementById('targetInfo').style.display = 'block';
                             document.getElementById('targetInfo').innerHTML = `🎯 Dígito da previsão: <strong>${i}</strong> (0% nos últimos 25 ticks) - Aguardando 8% para comprar`;
                             
-                            addLog(`🎯 Dígito da previsão encontrado: ${i} (0%)`, 'warning');
+                            addLog(`🎯 Dígito da previsão encontrado: ${i} (0%) - Aguardando 8%`, 'warning');
                             break;
                         }
                     }
                 }
                 
-                // PASSO 3: Aguardar chegar a 8%
+                // PASSO 2: Aguardar chegar a 8% (só executa se tem dígito alvo)
                 if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered) {
                     if(freq[botState.targetDigit] >= 8) {
                         botState.entryTriggered = true;
@@ -1181,14 +1190,14 @@ HTML = """
                         
                         addLog(`📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando no próximo tick...`, 'warning');
                         
-                        // PASSO 4: Comprar no próximo tick
+                        // PASSO 3: Comprar no próximo tick
                         setTimeout(() => {
                             if(!botState.running) return;
                             
                             botState.inPosition = true;
                             addLog(`✅ COMPRA REALIZADA: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
                             
-                            // Simular tick para ver resultado
+                            // Simular próximo tick para resultado
                             setTimeout(() => {
                                 if(!botState.running) return;
                                 
@@ -1196,7 +1205,7 @@ HTML = """
                                 let lastDigit = Math.floor(Math.random() * 10);
                                 let won = (lastDigit === botState.targetDigit);
                                 
-                                // PASSO 5: Aplicar martingale se perdeu / PASSO 6: Vender se ganhou
+                                // PASSO 4: Aplicar martingale se perdeu / Vender se ganhou
                                 if(won) {
                                     let profit = botState.stats.currentStake * 0.95;
                                     botState.stats.profit += profit;
@@ -1232,7 +1241,7 @@ HTML = """
                                     return;
                                 }
                                 
-                                // PASSO 7: Reset e cooldown de 5 segundos
+                                // PASSO 5: Reset e cooldown de 5 segundos APÓS VENDA
                                 botState.inPosition = false;
                                 botState.targetDigit = null;
                                 botState.entryTriggered = false;
@@ -1251,13 +1260,14 @@ HTML = """
                                     if(cooldown < 0) {
                                         clearInterval(cooldownInterval);
                                         document.getElementById('cooldownCounter').innerHTML = 'Pronto';
+                                        botState.waitingForCompletion = false; // LIBERA PARA NOVA ANÁLISE
                                         addLog('✅ Pronto para nova análise...', 'success');
                                     }
                                 }, 1000);
                                 
-                            }, 2000); // Tempo para o próximo tick
+                            }, 2000); // Próximo tick
                             
-                        }, 100); // Próximo tick
+                        }, 100); // Delay mínimo para próximo tick
                     }
                 }
                 
@@ -1265,7 +1275,7 @@ HTML = """
                 updateBars(freq, botState.targetDigit);
                 botState.frequencies = freq;
                 
-            }, 2000); // Atualizar a cada 2 segundos
+            }, 2000);
         }
     </script>
 </body>
@@ -1282,7 +1292,6 @@ async def health():
 
 @app.get("/api/price")
 async def get_price():
-    # Simular preço R_100
     price = 800 + random.random() * 100
     return {"price": round(price, 2)}
 
