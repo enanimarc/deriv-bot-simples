@@ -1,435 +1,736 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import HTMLResponse
-import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+import json
 import random
 from collections import deque, Counter
+import time
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 HTML = """
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
-    <title>Deriv Trading Bot</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deriv Bot - Dígito Matches</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #0d0d12;
             min-height: 100vh;
             padding: 20px;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
-            background: white;
-            border-radius: 20px;
+            background: #1a1a24;
+            border-radius: 16px;
             overflow: hidden;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border: 1px solid #2a2a35;
         }
         
+        /* Header */
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
+            background: #1e1e2a;
+            padding: 24px 32px;
+            border-bottom: 1px solid #2a2a35;
         }
         
         .header h1 {
-            font-size: 2em;
-            margin-bottom: 10px;
+            color: white;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
         }
         
-        .market-info {
-            background: #f8f9fa;
-            padding: 20px 30px;
-            border-bottom: 1px solid #e0e0e0;
+        .header p {
+            color: #8a8a9e;
+            font-size: 14px;
+        }
+        
+        /* Market Info Bar */
+        .market-bar {
+            background: #14141c;
+            padding: 16px 32px;
+            border-bottom: 1px solid #2a2a35;
             display: flex;
-            gap: 40px;
+            gap: 48px;
             flex-wrap: wrap;
         }
         
         .market-item {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 4px;
         }
         
         .market-label {
+            color: #6a6a7e;
             font-size: 12px;
-            color: #666;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .market-value {
+            color: white;
             font-size: 18px;
-            font-weight: 600;
-            color: #333;
+            font-weight: 500;
         }
         
-        .main-content {
-            display: flex;
-            padding: 30px;
-            gap: 30px;
+        .market-value.highlight {
+            color: #ff4444;
         }
         
+        .status-connected {
+            color: #4caf50;
+        }
+        
+        .status-disconnected {
+            color: #ff4444;
+        }
+        
+        /* Main Grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 0;
+        }
+        
+        /* Chart Panel */
         .chart-panel {
-            flex: 2;
-            background: white;
-            border-radius: 12px;
-            border: 1px solid #e0e0e0;
-            overflow: hidden;
+            padding: 24px;
+            border-right: 1px solid #2a2a35;
         }
         
         .chart-header {
-            padding: 20px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e0e0e0;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
         }
         
         .chart-title {
+            color: white;
             font-size: 16px;
-            font-weight: 600;
-            color: #333;
+            font-weight: 500;
+        }
+        
+        .chart-controls {
+            display: flex;
+            gap: 16px;
+        }
+        
+        .control-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .control-item label {
+            color: #8a8a9e;
+            font-size: 13px;
+        }
+        
+        .control-item select, .control-item input {
+            background: #1e1e2a;
+            border: 1px solid #2a2a35;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        /* Gráfico - IGUAL DERIV */
+        .chart-wrapper {
+            background: #14141c;
+            border-radius: 8px;
+            padding: 24px;
+            border: 1px solid #2a2a35;
         }
         
         .chart-container {
-            padding: 30px;
+            position: relative;
             height: 400px;
+            width: 100%;
+        }
+        
+        .y-axis {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 40px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 10px 0;
+        }
+        
+        .y-axis span {
+            color: #6a6a7e;
+            font-size: 11px;
+            text-align: right;
+            padding-right: 8px;
+        }
+        
+        .grid-area {
+            margin-left: 40px;
+            height: 100%;
+            position: relative;
+        }
+        
+        .grid-lines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        
+        .grid-line {
+            border-top: 1px dashed #2a2a35;
+            height: 0;
+            position: relative;
+        }
+        
+        .grid-line span {
+            position: absolute;
+            left: -30px;
+            top: -8px;
+            color: #6a6a7e;
+            font-size: 10px;
+        }
+        
+        .reference-lines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+        
+        .ref-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        
+        .ref-20 {
+            top: 20%;
+            border-top: 2px solid #ff4444;
+        }
+        
+        .ref-8 {
+            top: 68%;
+            border-top: 2px solid #ffaa00;
+        }
+        
+        .ref-4 {
+            top: 84%;
+            border-top: 2px solid #4caf50;
+        }
+        
+        .ref-label {
+            background: #1e1e2a;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 10px;
+            border: 1px solid #2a2a35;
+        }
+        
+        .bars-container {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 100%;
             display: flex;
             align-items: flex-end;
             justify-content: space-around;
-            position: relative;
+            padding: 0 5px;
         }
         
         .bar-wrapper {
             display: flex;
             flex-direction: column;
             align-items: center;
-            width: 60px;
+            width: 30px;
+            height: 100%;
+            justify-content: flex-end;
+            position: relative;
         }
         
         .bar {
-            width: 40px;
-            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
-            border-radius: 8px 8px 0 0;
-            transition: height 0.3s;
+            width: 24px;
+            background: linear-gradient(180deg, #ff6b6b 0%, #ff4444 100%);
+            border-radius: 4px 4px 0 0;
+            transition: height 0.3s ease;
             position: relative;
         }
         
         .bar.target {
-            background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
-        }
-        
-        .bar.zero {
-            background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+            background: linear-gradient(180deg, #ffaa00 0%, #ff8800 100%);
         }
         
         .bar-percent {
             position: absolute;
-            top: -25px;
+            top: -20px;
             left: 50%;
             transform: translateX(-50%);
-            font-size: 12px;
+            color: white;
+            font-size: 10px;
             font-weight: 600;
-            color: #333;
+            white-space: nowrap;
+            background: #1e1e2a;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #2a2a35;
         }
         
         .bar-label {
-            margin-top: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            color: #333;
+            margin-top: 8px;
+            color: white;
+            font-size: 12px;
+            font-weight: 500;
         }
         
+        /* Trading Panel */
         .trading-panel {
-            flex: 1;
-            background: white;
-            border-radius: 12px;
-            border: 1px solid #e0e0e0;
-            padding: 20px;
+            padding: 24px;
+            background: #14141c;
         }
         
-        .price-display {
-            background: #f8f9fa;
-            padding: 20px;
+        .price-box {
+            background: #1e1e2a;
             border-radius: 8px;
+            padding: 20px;
             text-align: center;
             margin-bottom: 20px;
+            border: 1px solid #2a2a35;
         }
         
         .price-label {
+            color: #8a8a9e;
             font-size: 12px;
-            color: #666;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
         }
         
         .price-value {
-            font-size: 36px;
+            color: white;
+            font-size: 42px;
             font-weight: 700;
-            color: #333;
+            font-family: 'Courier New', monospace;
         }
         
         .prediction-box {
-            background: #f8f9fa;
-            padding: 20px;
+            background: #1e1e2a;
             border-radius: 8px;
+            padding: 20px;
             text-align: center;
             margin-bottom: 20px;
+            border: 1px solid #2a2a35;
+        }
+        
+        .prediction-label {
+            color: #8a8a9e;
+            font-size: 12px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
         }
         
         .prediction-digit {
-            font-size: 48px;
+            color: #ff4444;
+            font-size: 64px;
             font-weight: 700;
-            color: #667eea;
-            margin-bottom: 5px;
+            line-height: 1;
+            margin-bottom: 8px;
         }
         
-        .countdown-box {
-            background: #f8f9fa;
-            padding: 15px;
+        .prediction-status {
+            color: #ffaa00;
+            font-size: 13px;
+        }
+        
+        .counters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .counter {
+            flex: 1;
+            background: #1e1e2a;
             border-radius: 8px;
+            padding: 16px;
             text-align: center;
-            margin-bottom: 10px;
+            border: 1px solid #2a2a35;
         }
         
-        .countdown-value {
-            font-size: 24px;
+        .counter-label {
+            color: #8a8a9e;
+            font-size: 11px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        
+        .counter-value {
+            color: #ffaa00;
+            font-size: 28px;
             font-weight: 700;
-            color: #667eea;
         }
         
         .profit-box {
-            background: #f8f9fa;
-            padding: 15px;
+            background: #1e1e2a;
             border-radius: 8px;
+            padding: 16px;
             margin-bottom: 20px;
+            border: 1px solid #2a2a35;
         }
         
         .profit-row {
             display: flex;
             justify-content: space-between;
-            padding: 5px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #2a2a35;
+        }
+        
+        .profit-row:last-child {
+            border-bottom: none;
+        }
+        
+        .profit-label {
+            color: #8a8a9e;
+            font-size: 13px;
+        }
+        
+        .profit-value {
+            color: white;
+            font-weight: 600;
         }
         
         .profit-positive {
-            color: #10b981;
-            font-weight: 600;
+            color: #4caf50;
         }
         
         .profit-negative {
-            color: #ef4444;
-            font-weight: 600;
+            color: #ff4444;
         }
         
         .config-box {
-            background: #f8f9fa;
-            padding: 20px;
+            background: #1e1e2a;
             border-radius: 8px;
-            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #2a2a35;
+        }
+        
+        .config-title {
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .config-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
         }
         
-        .config-row input {
-            width: 100px;
-            padding: 8px;
-            border: 1px solid #ddd;
+        .config-label {
+            color: #8a8a9e;
+            font-size: 13px;
+        }
+        
+        .config-input {
+            background: #14141c;
+            border: 1px solid #2a2a35;
+            color: white;
+            padding: 8px 12px;
             border-radius: 4px;
+            width: 100px;
+            text-align: right;
         }
         
-        button {
-            width: 100%;
+        .config-input.token {
+            width: 140px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin: 20px 0 12px;
+        }
+        
+        .btn {
+            flex: 1;
             padding: 12px;
             border: none;
-            border-radius: 8px;
-            font-size: 14px;
+            border-radius: 6px;
             font-weight: 600;
             cursor: pointer;
-            margin-bottom: 10px;
             transition: all 0.3s;
         }
         
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .btn-test {
+            background: #4a4a5a;
             color: white;
         }
         
-        .btn-success {
-            background: #10b981;
+        .btn-start {
+            background: #4caf50;
             color: white;
         }
         
-        .btn-danger {
-            background: #ef4444;
+        .btn-stop {
+            background: #f44336;
             color: white;
         }
         
-        button:hover {
+        .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            filter: brightness(1.1);
+        }
+        
+        .target-info {
+            background: #1e1e2a;
+            border-left: 4px solid #ffaa00;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 16px;
+            color: white;
+            font-size: 13px;
+            display: none;
         }
         
         .logs-panel {
-            background: #1a1a2e;
-            color: #e0e0e0;
-            padding: 20px 30px;
-            font-family: monospace;
+            background: #0a0a0f;
+            border-top: 1px solid #2a2a35;
+            padding: 16px 24px;
+            font-family: 'Courier New', monospace;
             font-size: 12px;
-            height: 150px;
+            height: 120px;
             overflow-y: auto;
+            color: #e0e0e0;
         }
         
         .log-entry {
             padding: 4px 0;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #1e1e2a;
         }
         
-        .target-info {
-            background: #fef3c7;
-            border-left: 4px solid #f59e0b;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 4px;
-        }
-        
-        .status-connected {
-            color: #10b981;
-            font-weight: 600;
-        }
-        
-        .status-disconnected {
-            color: #ef4444;
-            font-weight: 600;
-        }
+        .log-success { color: #4caf50; }
+        .log-error { color: #f44336; }
+        .log-warning { color: #ffaa00; }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Header -->
         <div class="header">
-            <h1>🤖 Deriv Trading Bot</h1>
-            <p>Estratégia: Dígito 0% → Aguarda 8% → Compra → Venda + Martingale</p>
+            <h1>🤖 Deriv Bot - Estratégia Dígito Matches</h1>
+            <p>Análise 25 ticks | Identifica 0% → Aguarda 8% → Compra → Venda + Martingale 1.15x</p>
         </div>
         
-        <div class="market-info">
+        <!-- Market Info -->
+        <div class="market-bar">
             <div class="market-item">
-                <span class="market-label">Mercado</span>
+                <span class="market-label">MERCADO</span>
                 <span class="market-value">Volatility 100 Index</span>
             </div>
             <div class="market-item">
-                <span class="market-label">Tipo</span>
-                <span class="market-value">Dígito Matches</span>
+                <span class="market-label">TIPO</span>
+                <span class="market-value highlight">Dígito Matches</span>
             </div>
             <div class="market-item">
-                <span class="market-label">Duração</span>
+                <span class="market-label">DURAÇÃO</span>
                 <span class="market-value">1 tick</span>
             </div>
             <div class="market-item">
-                <span class="market-label">Status</span>
+                <span class="market-label">STATUS</span>
                 <span class="market-value" id="statusDisplay">🔴 Desconectado</span>
             </div>
         </div>
         
-        <div class="main-content">
-            <!-- Gráfico -->
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Chart Panel -->
             <div class="chart-panel">
                 <div class="chart-header">
-                    <div class="chart-title">📊 Últimos 25 Dígitos</div>
+                    <div class="chart-title">📊 Last Digit Statistics - Últimos 25 ticks</div>
+                    <div class="chart-controls">
+                        <div class="control-item">
+                            <label>Market:</label>
+                            <select id="marketSelect">
+                                <option value="R_100" selected>Volatility 100 Index</option>
+                            </select>
+                        </div>
+                        <div class="control-item">
+                            <label>Ticks:</label>
+                            <input type="number" id="tickCount" value="25" readonly>
+                        </div>
+                    </div>
                 </div>
-                <div class="chart-container" id="chartContainer">
-                    <!-- Barras serão geradas pelo JavaScript -->
+                
+                <div class="chart-wrapper">
+                    <div class="chart-container">
+                        <!-- Y Axis -->
+                        <div class="y-axis">
+                            <span>20%</span>
+                            <span>16%</span>
+                            <span>12%</span>
+                            <span>8%</span>
+                            <span>4%</span>
+                            <span>0%</span>
+                        </div>
+                        
+                        <!-- Grid Area -->
+                        <div class="grid-area">
+                            <!-- Grid Lines -->
+                            <div class="grid-lines">
+                                <div class="grid-line"><span>20%</span></div>
+                                <div class="grid-line"><span>16%</span></div>
+                                <div class="grid-line"><span>12%</span></div>
+                                <div class="grid-line"><span>8%</span></div>
+                                <div class="grid-line"><span>4%</span></div>
+                                <div class="grid-line"><span>0%</span></div>
+                            </div>
+                            
+                            <!-- Reference Lines -->
+                            <div class="reference-lines">
+                                <div class="ref-line ref-20">
+                                    <span class="ref-label">20.00%</span>
+                                </div>
+                                <div class="ref-line ref-8">
+                                    <span class="ref-label">8.00%</span>
+                                </div>
+                                <div class="ref-line ref-4">
+                                    <span class="ref-label">4.00%</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Bars -->
+                            <div class="bars-container" id="barsContainer"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
-            <!-- Painel de Trading -->
+            <!-- Trading Panel -->
             <div class="trading-panel">
-                <div class="price-display">
+                <!-- Price -->
+                <div class="price-box">
                     <div class="price-label">Preço Atual</div>
                     <div class="price-value" id="currentPrice">---</div>
                 </div>
                 
+                <!-- Prediction -->
                 <div class="prediction-box">
-                    <div class="prediction-label">Dígito da Previsão</div>
+                    <div class="prediction-label">DÍGITO DA PREVISÃO</div>
                     <div class="prediction-digit" id="predictionDigit">-</div>
-                    <div id="predictionStatus">Aguardando...</div>
+                    <div class="prediction-status" id="predictionStatus">Aguardando...</div>
                 </div>
                 
-                <div class="countdown-box">
-                    <div class="countdown-label">Início em:</div>
-                    <div class="countdown-value" id="startCounter">20s</div>
+                <!-- Counters -->
+                <div class="counters">
+                    <div class="counter">
+                        <div class="counter-label">Início em</div>
+                        <div class="counter-value" id="startCounter">20s</div>
+                    </div>
+                    <div class="counter">
+                        <div class="counter-label">Próximo trade</div>
+                        <div class="counter-value" id="cooldownCounter">0s</div>
+                    </div>
                 </div>
                 
-                <div class="countdown-box">
-                    <div class="countdown-label">Próximo trade:</div>
-                    <div class="countdown-value" id="cooldownCounter">0s</div>
-                </div>
-                
+                <!-- Profit -->
                 <div class="profit-box">
                     <div class="profit-row">
-                        <span>Lucro/Perda:</span>
-                        <span id="totalProfit" class="profit-positive">$0.00</span>
+                        <span class="profit-label">Lucro/Perda:</span>
+                        <span class="profit-value" id="totalProfit">$0.00</span>
                     </div>
                     <div class="profit-row">
-                        <span>Trades:</span>
-                        <span id="totalTrades">0</span>
+                        <span class="profit-label">Trades:</span>
+                        <span class="profit-value" id="totalTrades">0</span>
                     </div>
                     <div class="profit-row">
-                        <span>Stake Atual:</span>
-                        <span id="currentStake">$0.35</span>
+                        <span class="profit-label">Stake Atual:</span>
+                        <span class="profit-value" id="currentStake">$0.35</span>
                     </div>
                 </div>
                 
+                <!-- Config -->
                 <div class="config-box">
-                    <h3>⚙️ Configurações</h3>
+                    <div class="config-title">⚙️ CONFIGURAÇÕES</div>
                     
                     <div class="config-row">
-                        <span>Token:</span>
-                        <input type="password" id="token" placeholder="Opcional">
+                        <span class="config-label">Token:</span>
+                        <input type="password" class="config-input token" id="token" placeholder="Opcional">
                     </div>
                     
                     <div class="config-row">
-                        <span>Stake Inicial:</span>
-                        <input type="number" id="stake" value="0.35" step="0.01">
+                        <span class="config-label">Stake Inicial:</span>
+                        <input type="number" class="config-input" id="stake" value="0.35" step="0.01">
                     </div>
                     
                     <div class="config-row">
-                        <span>Martingale:</span>
-                        <input type="number" id="martingale" value="1.15" step="0.01">
+                        <span class="config-label">Martingale:</span>
+                        <input type="number" class="config-input" id="martingale" value="1.15" step="0.01">
                     </div>
                     
                     <div class="config-row">
-                        <span>Stop Loss:</span>
-                        <input type="number" id="stopLoss" value="10">
+                        <span class="config-label">Stop Loss:</span>
+                        <input type="number" class="config-input" id="stopLoss" value="10">
                     </div>
                     
                     <div class="config-row">
-                        <span>Stop Win:</span>
-                        <input type="number" id="stopWin" value="10">
+                        <span class="config-label">Stop Win:</span>
+                        <input type="number" class="config-input" id="stopWin" value="10">
                     </div>
                     
-                    <button class="btn-primary" onclick="testConnection()">🔌 Testar</button>
-                    <button class="btn-success" onclick="startBot()">▶️ Iniciar</button>
-                    <button class="btn-danger" onclick="stopBot()">⏹️ Parar</button>
+                    <div class="button-group">
+                        <button class="btn btn-test" onclick="testConnection()">🔌 Testar</button>
+                        <button class="btn btn-start" onclick="startBot()">▶️ Iniciar</button>
+                        <button class="btn btn-stop" onclick="stopBot()">⏹️ Parar</button>
+                    </div>
                     
-                    <div id="targetInfo" class="target-info" style="display: none;"></div>
+                    <div id="targetInfo" class="target-info"></div>
                 </div>
             </div>
         </div>
         
+        <!-- Logs -->
         <div class="logs-panel" id="logs"></div>
     </div>
     
@@ -462,17 +763,16 @@ HTML = """
         let priceInterval = null;
         let countdownInterval = null;
         let cooldownInterval = null;
-        let tradingInterval = null;
         
-        // Inicializar gráfico
-        function initChart() {
-            let container = document.getElementById('chartContainer');
+        // Inicializar barras
+        function initBars() {
+            let container = document.getElementById('barsContainer');
             let html = '';
             
             for(let i = 0; i <= 9; i++) {
                 html += `
-                    <div class="bar-wrapper" id="bar-${i}">
-                        <div class="bar" id="bar-fill-${i}" style="height: 0%">
+                    <div class="bar-wrapper" id="bar-wrapper-${i}">
+                        <div class="bar" id="bar-${i}">
                             <span class="bar-percent" id="percent-${i}">0.0%</span>
                         </div>
                         <div class="bar-label">${i}</div>
@@ -482,13 +782,12 @@ HTML = """
             
             container.innerHTML = html;
         }
-        initChart();
+        initBars();
         
         function addLog(message, type = 'info') {
             let logs = document.getElementById('logs');
             let entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.style.color = type === 'success' ? '#4ade80' : type === 'error' ? '#f87171' : '#e0e0e0';
+            entry.className = `log-entry log-${type}`;
             entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}`;
             logs.appendChild(entry);
             logs.scrollTop = logs.scrollHeight;
@@ -500,7 +799,7 @@ HTML = """
         
         function updateBars() {
             for(let i = 0; i <= 9; i++) {
-                let bar = document.getElementById(`bar-fill-${i}`);
+                let bar = document.getElementById(`bar-${i}`);
                 let percentEl = document.getElementById(`percent-${i}`);
                 let percent = botState.frequencies[i] || 0;
                 
@@ -510,34 +809,37 @@ HTML = """
                 bar.style.height = height + '%';
                 percentEl.innerHTML = percent.toFixed(1) + '%';
                 
-                // Destacar barras
-                bar.classList.remove('target', 'zero');
                 if(i === botState.targetDigit) {
                     bar.classList.add('target');
-                } else if(percent === 0) {
-                    bar.classList.add('zero');
+                } else {
+                    bar.classList.remove('target');
                 }
             }
         }
         
         function updatePrice() {
-            let price = (800 + Math.random() * 100).toFixed(2);
+            // Simular preço Volatility 100 Index
+            let price = (800 + Math.random() * 200).toFixed(2);
             document.getElementById('currentPrice').innerHTML = price;
             
-            // Simular tick real
+            // Extrair último dígito
             let lastDigit = parseInt(price[price.length - 1]);
+            
+            // Atualizar histórico
             botState.tickHistory.push(lastDigit);
             if(botState.tickHistory.length > 25) {
                 botState.tickHistory.shift();
             }
             
-            // Calcular frequências
+            // Calcular frequências quando tiver 25 ticks
             if(botState.tickHistory.length === 25) {
                 let counts = Array(10).fill(0);
                 botState.tickHistory.forEach(d => counts[d]++);
+                
                 for(let i = 0; i <= 9; i++) {
                     botState.frequencies[i] = (counts[i] / 25) * 100;
                 }
+                
                 updateBars();
                 
                 // Executar estratégia se o bot estiver rodando
@@ -576,18 +878,22 @@ HTML = """
                     
                     addLog(`📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando...`, 'warning');
                     
-                    // PASSO 3: Comprar
+                    // PASSO 3: Comprar no próximo tick
                     setTimeout(() => {
                         if(!botState.running) return;
                         
                         botState.inPosition = true;
                         addLog(`✅ COMPRA: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
                         
-                        // PASSO 4: Verificar resultado
+                        // PASSO 4: Aguardar resultado
                         setTimeout(() => {
                             if(!botState.running) return;
                             
-                            let won = (lastDigit === botState.targetDigit);
+                            // Gerar próximo tick
+                            let nextPrice = (800 + Math.random() * 200).toFixed(2);
+                            let nextDigit = parseInt(nextPrice[nextPrice.length - 1]);
+                            
+                            let won = (nextDigit === botState.targetDigit);
                             
                             if(won) {
                                 let profit = botState.stats.currentStake * 0.95;
@@ -597,7 +903,7 @@ HTML = """
                                 botState.stats.losses = 0;
                                 botState.stats.currentStake = botState.config.stake;
                                 
-                                addLog(`💰 VENDA: Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
+                                addLog(`💰 VENDA: Dígito ${nextDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
                             } else {
                                 let loss = -botState.stats.currentStake;
                                 botState.stats.profit += loss;
@@ -605,8 +911,8 @@ HTML = """
                                 botState.stats.losses++;
                                 botState.stats.currentStake *= botState.config.martingale;
                                 
-                                addLog(`❌ PERDA: Dígito ${lastDigit} não saiu! Prejuízo: $${Math.abs(loss).toFixed(2)}`, 'error');
-                                addLog(`📈 Martingale: Nova stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
+                                addLog(`❌ PERDA: Dígito ${nextDigit} não saiu! Prejuízo: $${Math.abs(loss).toFixed(2)}`, 'error');
+                                addLog(`📈 Martingale ativado - Nova stake: $${botState.stats.currentStake.toFixed(2)}`, 'warning');
                             }
                             
                             updateStats();
@@ -656,7 +962,7 @@ HTML = """
         function updateStats() {
             let profitEl = document.getElementById('totalProfit');
             profitEl.innerHTML = '$' + botState.stats.profit.toFixed(2);
-            profitEl.className = botState.stats.profit >= 0 ? 'profit-positive' : 'profit-negative';
+            profitEl.className = 'profit-value ' + (botState.stats.profit >= 0 ? 'profit-positive' : 'profit-negative');
             
             document.getElementById('totalTrades').innerHTML = botState.stats.trades;
             document.getElementById('currentStake').innerHTML = '$' + botState.stats.currentStake.toFixed(2);
@@ -666,7 +972,7 @@ HTML = """
             botState.connected = true;
             document.getElementById('statusDisplay').innerHTML = '🟢 Conectado';
             document.getElementById('statusDisplay').className = 'market-value status-connected';
-            addLog('✅ Conexão testada com sucesso', 'success');
+            addLog('✅ Conectado à Deriv', 'success');
         }
         
         function startBot() {
@@ -683,7 +989,7 @@ HTML = """
             
             addLog('🚀 Iniciando robô... Aguardando 20 segundos', 'warning');
             
-            // Iniciar simulação de preço
+            // Iniciar preço em tempo real
             if(priceInterval) clearInterval(priceInterval);
             priceInterval = setInterval(updatePrice, 1000);
             
@@ -730,6 +1036,7 @@ async def health():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
            
            
