@@ -754,13 +754,28 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÃO PARA EXTRAIR O ÚLTIMO DÍGITO DO PREÇO
+        // FUNÇÃO PARA EXTRAIR O ÚLTIMO DÍGITO DO PREÇO - CORRIGIDA
         // ============================================
         function getLastDigit(price) {
+            // Converte para string e remove ponto decimal
             let priceStr = price.toString();
+            
+            // Remove o ponto decimal se existir
             priceStr = priceStr.replace('.', '');
-            let lastDigit = parseInt(priceStr[priceStr.length - 1]);
-            return isNaN(lastDigit) ? 0 : lastDigit;
+            
+            // Pega o último caractere
+            let lastChar = priceStr[priceStr.length - 1];
+            
+            // Converte para número - ISSO INCLUI O ZERO!
+            let digit = parseInt(lastChar, 10);
+            
+            // Verificação de segurança - se for NaN, retorna 0
+            if (isNaN(digit)) {
+                console.warn('⚠️ Dígito inválido:', price, '->', lastChar);
+                return 0;
+            }
+            
+            return digit;
         }
         
         // ============================================
@@ -840,11 +855,21 @@ HTML = """
                         
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
+                        // LOG DO DIGITO RECEBIDO - INCLUINDO ZERO
+                        addLog(`📊 Tick recebido: $${price.toFixed(2)} | Dígito: ${digit}`, 'info');
+                        
+                        // Adicionar ao histórico - SEM FILTRO
                         botState.tickHistory.push(digit);
+                        
+                        // Manter apenas últimos 25
                         if(botState.tickHistory.length > 25) {
                             botState.tickHistory.shift();
                         }
                         
+                        // Log do histórico para debug
+                        addLog(`📈 Histórico (${botState.tickHistory.length}/25): [${botState.tickHistory.join(', ')}]`, 'info');
+                        
+                        // Calcular frequências
                         calculateFrequencies();
                         updateDebug();
                         
@@ -931,6 +956,7 @@ HTML = """
             
             let counts = Array(10).fill(0);
             
+            // Contar TODOS os dígitos, incluindo ZERO
             for(let i = 0; i < botState.tickHistory.length; i++) {
                 let digit = botState.tickHistory[i];
                 counts[digit]++;
@@ -938,6 +964,7 @@ HTML = """
             
             let total = botState.tickHistory.length;
             
+            // Calcular percentuais para TODOS os dígitos
             for(let i = 0; i <= 9; i++) {
                 botState.frequencies[i] = (counts[i] / total) * 100;
             }
