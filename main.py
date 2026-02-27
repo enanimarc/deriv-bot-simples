@@ -19,172 +19,544 @@ app.add_middleware(
 
 HTML = """
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
-    <title>Deriv Trading Bot</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deriv Bot - Dígito Matches</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             min-height: 100vh;
             padding: 20px;
         }
+        
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border-radius: 16px;
             overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
         }
+        
+        /* Header - Igual Deriv */
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #ff4444;
+            padding: 20px 30px;
             color: white;
-            padding: 30px;
-            text-align: center;
         }
-        .header h1 { font-size: 2em; margin-bottom: 10px; }
-        .content { display: flex; padding: 20px; gap: 20px; }
-        .sidebar {
-            width: 300px;
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 10px;
-        }
-        .main { flex: 1; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label {
-            display: block;
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
             margin-bottom: 5px;
+        }
+        
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        /* Market Info */
+        .market-info {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+        
+        .market-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .market-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        
+        .market-value {
+            font-size: 18px;
             font-weight: 600;
             color: #333;
         }
-        .form-group input {
-            width: 100%;
-            padding: 10px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 14px;
+        
+        .market-value.highlight {
+            color: #ff4444;
         }
-        .form-group input:focus {
-            border-color: #667eea;
-            outline: none;
+        
+        /* Main Content */
+        .main-content {
+            padding: 30px;
+            display: flex;
+            gap: 30px;
         }
-        button {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
+        
+        /* Left Panel - Gráfico */
+        .chart-panel {
+            flex: 2;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #e0e0e0;
+            overflow: hidden;
+        }
+        
+        .chart-header {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .chart-controls {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .control-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .control-item label {
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .control-item select, .control-item input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        /* Gráfico de Barras - IGUAL DA DERIV */
+        .chart-container {
+            padding: 30px;
+            position: relative;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .y-axis {
+            position: absolute;
+            left: 30px;
+            top: 50px;
+            bottom: 50px;
+            width: 40px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            color: #999;
+            font-size: 12px;
+        }
+        
+        .y-axis span {
+            text-align: right;
+            padding-right: 10px;
+        }
+        
+        .bars-container {
+            flex: 1;
+            margin-left: 70px;
+            position: relative;
+        }
+        
+        .grid-lines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        
+        .grid-line {
+            border-top: 1px dashed #e0e0e0;
+            height: 0;
+            position: relative;
+        }
+        
+        .grid-line span {
+            position: absolute;
+            left: -40px;
+            top: -8px;
+            color: #999;
+            font-size: 11px;
+        }
+        
+        .bars-row {
+            display: flex;
+            align-items: center;
+            height: 10%;
+            margin-bottom: 5px;
+            position: relative;
+            z-index: 2;
+        }
+        
+        .bar-label {
+            width: 30px;
             font-size: 14px;
             font-weight: 600;
+            color: #333;
+        }
+        
+        .bar-wrapper {
+            flex: 1;
+            height: 30px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            position: relative;
             cursor: pointer;
-            transition: all 0.3s;
-            margin-right: 10px;
+        }
+        
+        .bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b 0%, #ff4444 100%);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            position: relative;
+        }
+        
+        .bar-percent {
+            position: absolute;
+            right: -40px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            font-weight: 600;
+            color: #ff4444;
+            white-space: nowrap;
+        }
+        
+        /* Linhas de referência */
+        .reference-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            z-index: 3;
+            pointer-events: none;
+        }
+        
+        .ref-20 {
+            top: 20%;
+            border-top: 2px solid #ff4444;
+        }
+        
+        .ref-8 {
+            top: 68%;
+            border-top: 2px solid #ffaa00;
+        }
+        
+        .ref-4 {
+            top: 84%;
+            border-top: 2px solid #4caf50;
+        }
+        
+        .ref-label {
+            position: absolute;
+            right: 10px;
+            top: -10px;
+            background: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .ref-20 .ref-label { color: #ff4444; }
+        .ref-8 .ref-label { color: #ffaa00; }
+        .ref-4 .ref-label { color: #4caf50; }
+        
+        /* Right Panel - Trading */
+        .trading-panel {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+        }
+        
+        .price-display {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .price-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .price-value {
+            font-size: 48px;
+            font-weight: 700;
+            color: #333;
+        }
+        
+        .trade-type {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .trade-type h3 {
+            font-size: 14px;
+            color: #333;
             margin-bottom: 10px;
         }
-        .btn-primary {
-            background: #667eea;
-            color: white;
+        
+        .type-options {
+            display: flex;
+            gap: 10px;
         }
-        .btn-primary:hover { background: #5a67d8; transform: translateY(-2px); }
-        .btn-success {
-            background: #48bb78;
-            color: white;
+        
+        .type-option {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
         }
-        .btn-success:hover { background: #38a169; transform: translateY(-2px); }
-        .btn-danger {
-            background: #f56565;
+        
+        .type-option.active {
+            background: #ff4444;
             color: white;
+            border-color: #ff4444;
         }
-        .btn-danger:hover { background: #e53e3e; transform: translateY(-2px); }
-        .stats {
+        
+        .digit-prediction {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .digit-prediction h3 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .digit-selector {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+        }
+        
+        .digit-btn {
+            aspect-ratio: 1;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .digit-btn.active {
+            background: #ff4444;
+            color: white;
+            border-color: #ff4444;
+        }
+        
+        .stake-box {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .stake-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .stake-value {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .stake-value input {
+            width: 100px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            text-align: right;
+        }
+        
+        .contract-info {
             background: white;
             padding: 15px;
             border-radius: 8px;
-            margin-top: 20px;
+            margin-bottom: 20px;
         }
-        .stat-item {
+        
+        .contract-row {
             display: flex;
             justify-content: space-between;
             padding: 8px 0;
             border-bottom: 1px solid #eee;
         }
-        .stat-value { font-weight: bold; color: #667eea; }
-        .digit-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 10px;
-            margin-bottom: 20px;
+        
+        .contract-row:last-child {
+            border-bottom: none;
         }
-        .digit-card {
-            text-align: center;
+        
+        .payout-highlight {
+            color: #ff4444;
+            font-weight: 600;
+        }
+        
+        .profit-highlight {
+            color: #4caf50;
+            font-weight: 600;
+        }
+        
+        .buy-btn {
+            width: 100%;
             padding: 15px;
-            border-radius: 8px;
-            background: #f8f9fa;
-            border: 2px solid #ddd;
-            transition: all 0.3s;
-        }
-        .digit-card.target {
-            background: #fef3c7;
-            border-color: #f59e0b;
-            animation: pulse 1s infinite;
-        }
-        .digit-card.zero {
-            background: #fee2e2;
-            border-color: #ef4444;
-        }
-        .digit-number { font-size: 24px; font-weight: bold; }
-        .digit-percent { font-size: 14px; color: #666; }
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-        }
-        .counter-box {
-            background: #667eea;
+            background: linear-gradient(90deg, #ff6b6b 0%, #ff4444 100%);
             color: white;
-            padding: 20px;
+            border: none;
             border-radius: 8px;
-            text-align: center;
-            margin: 10px 0;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: transform 0.2s;
         }
-        .counter-box h2 { font-size: 2em; margin: 0; }
-        .logs {
-            background: #1a202c;
-            color: #e2e8f0;
+        
+        .buy-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(255,68,68,0.3);
+        }
+        
+        .config-section {
+            margin-top: 20px;
             padding: 15px;
+            background: #f8f9fa;
             border-radius: 8px;
-            height: 200px;
-            overflow-y: auto;
+        }
+        
+        .config-section h3 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .config-row input {
+            width: 100px;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .bot-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .bot-btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        .start-btn {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .stop-btn {
+            background: #f44336;
+            color: white;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-connected { background: #4caf50; }
+        .status-disconnected { background: #f44336; }
+        
+        .target-info {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        .logs-panel {
+            margin-top: 20px;
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 15px;
+            color: #e0e0e0;
             font-family: monospace;
             font-size: 12px;
+            height: 150px;
+            overflow-y: auto;
         }
+        
         .log-entry {
-            padding: 4px 0;
-            border-bottom: 1px solid #2d3748;
-        }
-        .connection-status {
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-        }
-        .connected { background: #c6f6d5; color: #22543d; }
-        .disconnected { background: #fed7d7; color: #742a2a; }
-        .target-info {
-            background: #fef3c7;
-            border-left: 4px solid #f59e0b;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 10px 0;
-        }
-        .martingale-info {
-            background: #fed7d7;
-            border-left: 4px solid #ef4444;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 10px 0;
-            display: none;
+            padding: 3px 0;
+            border-bottom: 1px solid #333;
         }
     </style>
 </head>
@@ -192,94 +564,314 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Trading Bot - Dígito Matches</h1>
-            <p>Estratégia: Dígito 0% → 8% → Compra → Venda + Martingale 1.15x</p>
+            <p>Estratégia: Identificar dígito 0% → Aguardar 8% → Comprar → Vender quando sair</p>
         </div>
         
-        <div class="content">
-            <div class="sidebar">
-                <h3>⚙️ Configurações</h3>
-                
-                <div class="form-group">
-                    <label>🔑 Token da Deriv</label>
-                    <input type="password" id="token" placeholder="Cole seu token">
-                </div>
-                
-                <div class="form-group">
-                    <label>💰 Stake Inicial ($)</label>
-                    <input type="number" id="stake" value="0.35" step="0.01" min="0.35">
-                </div>
-                
-                <div class="form-group">
-                    <label>📈 Multiplicador Martingale</label>
-                    <input type="number" id="martingale" value="1.15" step="0.01" min="1.0">
-                </div>
-                
-                <div class="form-group">
-                    <label>🛑 Stop Loss ($)</label>
-                    <input type="number" id="stopLoss" value="10" step="0.01">
-                </div>
-                
-                <div class="form-group">
-                    <label>🎯 Stop Win ($)</label>
-                    <input type="number" id="stopWin" value="10" step="0.01">
-                </div>
-                
-                <button class="btn-primary" onclick="testConnection()">🔌 Testar Conexão</button>
-                <button class="btn-success" onclick="startBot()">▶️ Iniciar Robô</button>
-                <button class="btn-danger" onclick="stopBot()">⏹️ Parar Robô</button>
-                
-                <div id="connectionStatus" class="connection-status disconnected">
-                    🔴 Desconectado
-                </div>
-                
-                <div class="stats">
-                    <h4>📊 Estatísticas</h4>
-                    <div class="stat-item">
-                        <span>Lucro Total:</span>
-                        <span class="stat-value" id="totalProfit">$0.00</span>
+        <div class="market-info">
+            <div class="market-item">
+                <span class="market-label">Market</span>
+                <span class="market-value">Volatility 100 Index</span>
+            </div>
+            <div class="market-item">
+                <span class="market-label">Trade types</span>
+                <span class="market-value highlight">Matches/Differs</span>
+            </div>
+            <div class="market-item">
+                <span class="market-label">Current Price</span>
+                <span class="market-value" id="currentPrice">816.95</span>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <!-- Gráfico de Barras - IGUAL DA DERIV -->
+            <div class="chart-panel">
+                <div class="chart-header">
+                    <div class="chart-title">Last Digit Stats</div>
+                    <div class="chart-controls">
+                        <div class="control-item">
+                            <label>Market:</label>
+                            <select id="marketSelect">
+                                <option value="R_100" selected>Volatility 100 Index</option>
+                            </select>
+                        </div>
+                        <div class="control-item">
+                            <label>Ticks:</label>
+                            <input type="number" id="tickCount" value="25" readonly>
+                        </div>
                     </div>
-                    <div class="stat-item">
-                        <span>Trades:</span>
-                        <span class="stat-value" id="totalTrades">0</span>
+                </div>
+                
+                <div class="chart-container">
+                    <!-- Eixo Y -->
+                    <div class="y-axis">
+                        <span>20%</span>
+                        <span>16%</span>
+                        <span>12%</span>
+                        <span>8%</span>
+                        <span>4%</span>
+                        <span>0%</span>
                     </div>
-                    <div class="stat-item">
-                        <span>Win Rate:</span>
-                        <span class="stat-value" id="winRate">0%</span>
+                    
+                    <!-- Grid Lines -->
+                    <div class="grid-lines">
+                        <div class="grid-line" style="top: 0%;"><span>20%</span></div>
+                        <div class="grid-line" style="top: 20%;"><span>16%</span></div>
+                        <div class="grid-line" style="top: 40%;"><span>12%</span></div>
+                        <div class="grid-line" style="top: 60%;"><span>8%</span></div>
+                        <div class="grid-line" style="top: 80%;"><span>4%</span></div>
+                        <div class="grid-line" style="top: 100%;"><span>0%</span></div>
                     </div>
-                    <div class="stat-item">
-                        <span>Stake Atual:</span>
-                        <span class="stat-value" id="currentStake">$0.35</span>
+                    
+                    <!-- Barras para cada dígito -->
+                    <div class="bars-container">
+                        <!-- Linhas de referência coloridas -->
+                        <div class="reference-line ref-20">
+                            <span class="ref-label">20.00%</span>
+                        </div>
+                        <div class="reference-line ref-8">
+                            <span class="ref-label">8.00%</span>
+                        </div>
+                        <div class="reference-line ref-4">
+                            <span class="ref-label">4.00%</span>
+                        </div>
+                        
+                        <!-- Dígito 0 -->
+                        <div class="bars-row">
+                            <div class="bar-label">0</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-0" style="width: 0%">
+                                    <span class="bar-percent" id="percent-0">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 1 -->
+                        <div class="bars-row">
+                            <div class="bar-label">1</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-1" style="width: 0%">
+                                    <span class="bar-percent" id="percent-1">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 2 -->
+                        <div class="bars-row">
+                            <div class="bar-label">2</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-2" style="width: 0%">
+                                    <span class="bar-percent" id="percent-2">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 3 -->
+                        <div class="bars-row">
+                            <div class="bar-label">3</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-3" style="width: 0%">
+                                    <span class="bar-percent" id="percent-3">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 4 -->
+                        <div class="bars-row">
+                            <div class="bar-label">4</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-4" style="width: 0%">
+                                    <span class="bar-percent" id="percent-4">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 5 -->
+                        <div class="bars-row">
+                            <div class="bar-label">5</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-5" style="width: 0%">
+                                    <span class="bar-percent" id="percent-5">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 6 -->
+                        <div class="bars-row">
+                            <div class="bar-label">6</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-6" style="width: 0%">
+                                    <span class="bar-percent" id="percent-6">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 7 -->
+                        <div class="bars-row">
+                            <div class="bar-label">7</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-7" style="width: 0%">
+                                    <span class="bar-percent" id="percent-7">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 8 -->
+                        <div class="bars-row">
+                            <div class="bar-label">8</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-8" style="width: 0%">
+                                    <span class="bar-percent" id="percent-8">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Dígito 9 -->
+                        <div class="bars-row">
+                            <div class="bar-label">9</div>
+                            <div class="bar-wrapper">
+                                <div class="bar-fill" id="bar-9" style="width: 0%">
+                                    <span class="bar-percent" id="percent-9">0.0%</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
             
-            <div class="main">
-                <div class="counter-box" id="startCounter">
-                    <h2>20</h2>
-                    <p>Segundos para iniciar</p>
+            <!-- Painel de Trading -->
+            <div class="trading-panel">
+                <div class="price-display">
+                    <div class="price-label">Current Price</div>
+                    <div class="price-value" id="priceDisplay">816.95</div>
                 </div>
                 
-                <div class="counter-box" id="cooldownCounter">
-                    <h2>5</h2>
-                    <p>Segundos pós-venda</p>
+                <div class="trade-type">
+                    <h3>Trade types</h3>
+                    <div class="type-options">
+                        <div class="type-option active">Matches</div>
+                        <div class="type-option">Differs</div>
+                    </div>
                 </div>
                 
-                <div class="target-info" id="targetInfo" style="display: none;">
-                    <strong id="targetMessage">Aguardando dígito alvo...</strong>
+                <div class="digit-prediction">
+                    <h3>Last Digit Prediction</h3>
+                    <div class="digit-selector" id="digitSelector">
+                        <div class="digit-btn">0</div>
+                        <div class="digit-btn">1</div>
+                        <div class="digit-btn">2</div>
+                        <div class="digit-btn">3</div>
+                        <div class="digit-btn">4</div>
+                        <div class="digit-btn">5</div>
+                        <div class="digit-btn">6</div>
+                        <div class="digit-btn">7</div>
+                        <div class="digit-btn">8</div>
+                        <div class="digit-btn">9</div>
+                    </div>
                 </div>
                 
-                <div class="martingale-info" id="martingaleInfo">
-                    <strong>📈 Martingale Ativado</strong>
-                    <span id="martingaleMessage"></span>
+                <div class="stake-box">
+                    <div class="stake-header">
+                        <span>Duration</span>
+                        <span>1 ticks</span>
+                    </div>
+                    <div class="stake-header">
+                        <span>Stake</span>
+                        <div class="stake-value">
+                            <input type="number" id="stakeInput" value="0.35" step="0.01" min="0.35">
+                            <span>USD</span>
+                        </div>
+                    </div>
                 </div>
                 
-                <h3>📊 Frequência dos Dígitos (Últimos 25 ticks)</h3>
-                <div class="digit-grid" id="digitGrid"></div>
+                <!-- Contrato 1 -->
+                <div class="contract-info">
+                    <div class="contract-row">
+                        <span>Stake:</span>
+                        <span id="contract1Stake">0.35 USD</span>
+                    </div>
+                    <div class="contract-row">
+                        <span>Payout:</span>
+                        <span class="payout-highlight" id="contract1Payout">2.92 USD</span>
+                    </div>
+                    <div class="contract-row">
+                        <span>Net profit:</span>
+                        <span class="profit-highlight" id="contract1Profit">2.57 USD</span>
+                    </div>
+                    <div class="contract-row">
+                        <span>Return:</span>
+                        <span>734.3%</span>
+                    </div>
+                </div>
                 
-                <h3>📝 Logs</h3>
-                <div class="logs" id="logs"></div>
+                <button class="buy-btn" onclick="manualBuy()">Purchase</button>
+                
+                <!-- Contrato 2 -->
+                <div class="contract-info">
+                    <div class="contract-row">
+                        <span>Stake:</span>
+                        <span id="contract2Stake">0.35 USD</span>
+                    </div>
+                    <div class="contract-row">
+                        <span>Payout:</span>
+                        <span class="payout-highlight" id="contract2Payout">0.37 USD</span>
+                    </div>
+                    <div class="contract-row">
+                        <span>Net profit:</span>
+                        <span class="profit-highlight" id="contract2Profit">0.02 USD</span>
+                    </div>
+                    <div class="contract-row">
+                        <span>Return:</span>
+                        <span>5.7%</span>
+                    </div>
+                </div>
+                
+                <!-- Configurações do Bot -->
+                <div class="config-section">
+                    <h3>🤖 Configurações do Bot Automático</h3>
+                    
+                    <div class="config-row">
+                        <span>Token:</span>
+                        <input type="password" id="token" placeholder="Seu token" style="width: 150px;">
+                    </div>
+                    
+                    <div class="config-row">
+                        <span>Stake Inicial:</span>
+                        <input type="number" id="botStake" value="0.35" step="0.01">
+                    </div>
+                    
+                    <div class="config-row">
+                        <span>Martingale:</span>
+                        <input type="number" id="martingale" value="1.15" step="0.01">
+                    </div>
+                    
+                    <div class="config-row">
+                        <span>Stop Loss ($):</span>
+                        <input type="number" id="stopLoss" value="10">
+                    </div>
+                    
+                    <div class="config-row">
+                        <span>Stop Win ($):</span>
+                        <input type="number" id="stopWin" value="10">
+                    </div>
+                    
+                    <div class="bot-controls">
+                        <button class="bot-btn start-btn" onclick="testConnection()">🔌 Testar</button>
+                        <button class="bot-btn start-btn" onclick="startBot()">▶️ Iniciar</button>
+                        <button class="bot-btn stop-btn" onclick="stopBot()">⏹️ Parar</button>
+                    </div>
+                    
+                    <div id="connectionStatus" style="margin-top: 10px; font-size: 12px;">
+                        <span class="status-indicator status-disconnected"></span>
+                        Desconectado
+                    </div>
+                    
+                    <div id="targetInfo" class="target-info" style="display: none;"></div>
+                </div>
             </div>
         </div>
+        
+        <!-- Logs -->
+        <div class="logs-panel" id="logs"></div>
     </div>
     
     <script>
@@ -307,39 +899,8 @@ HTML = """
             lastDigits: []
         };
         
-        let ws = null;
-        let countdownInterval = null;
         let tradingInterval = null;
-        
-        // Inicializar grid
-        function initGrid() {
-            let html = '';
-            for(let i = 0; i <= 9; i++) {
-                html += `
-                    <div class="digit-card" id="digit-${i}">
-                        <div class="digit-number">${i}</div>
-                        <div class="digit-percent">0.0%</div>
-                    </div>
-                `;
-            }
-            document.getElementById('digitGrid').innerHTML = html;
-        }
-        initGrid();
-        
-        function updateDigits(frequencies, target) {
-            for(let i = 0; i <= 9; i++) {
-                let card = document.getElementById(`digit-${i}`);
-                let percent = frequencies[i] || 0;
-                card.querySelector('.digit-percent').innerHTML = percent.toFixed(1) + '%';
-                
-                card.classList.remove('target', 'zero');
-                if(i === target) {
-                    card.classList.add('target');
-                } else if(percent === 0) {
-                    card.classList.add('zero');
-                }
-            }
-        }
+        let countdownInterval = null;
         
         function addLog(message, type = 'info') {
             let logs = document.getElementById('logs');
@@ -354,15 +915,32 @@ HTML = """
             }
         }
         
-        function updateStats() {
-            document.getElementById('totalProfit').innerHTML = '$' + botState.stats.profit.toFixed(2);
-            document.getElementById('totalTrades').innerHTML = botState.stats.trades;
-            
-            let winRate = botState.stats.trades > 0 
-                ? ((botState.stats.wins / botState.stats.trades) * 100).toFixed(1)
-                : 0;
-            document.getElementById('winRate').innerHTML = winRate + '%';
-            document.getElementById('currentStake').innerHTML = '$' + botState.stats.currentStake.toFixed(2);
+        function updateBars(frequencies, target) {
+            for(let i = 0; i <= 9; i++) {
+                let percent = frequencies[i] || 0;
+                let bar = document.getElementById(`bar-${i}`);
+                let percentEl = document.getElementById(`percent-${i}`);
+                
+                // Calcular largura (máximo 100% = 20% do gráfico)
+                let width = (percent / 20) * 100;
+                if(width > 100) width = 100;
+                
+                bar.style.width = width + '%';
+                percentEl.innerHTML = percent.toFixed(1) + '%';
+                
+                // Destacar barra se for o alvo
+                if(i === target) {
+                    bar.style.background = 'linear-gradient(90deg, #ffaa00 0%, #ff8800 100%)';
+                } else {
+                    bar.style.background = 'linear-gradient(90deg, #ff6b6b 0%, #ff4444 100%)';
+                }
+            }
+        }
+        
+        function updatePrice() {
+            let price = (800 + Math.random() * 40).toFixed(2);
+            document.getElementById('currentPrice').innerHTML = price;
+            document.getElementById('priceDisplay').innerHTML = price;
         }
         
         function testConnection() {
@@ -372,8 +950,7 @@ HTML = """
                 return;
             }
             
-            document.getElementById('connectionStatus').className = 'connection-status connected';
-            document.getElementById('connectionStatus').innerHTML = '🟢 Conectado';
+            document.getElementById('connectionStatus').innerHTML = '<span class="status-indicator status-connected"></span> Conectado';
             botState.connected = true;
             botState.token = token;
             addLog('✅ Conectado à Deriv');
@@ -387,33 +964,30 @@ HTML = """
             
             botState.running = true;
             botState.config = {
-                stake: parseFloat(document.getElementById('stake').value),
+                stake: parseFloat(document.getElementById('botStake').value),
                 martingale: parseFloat(document.getElementById('martingale').value),
                 stopLoss: parseFloat(document.getElementById('stopLoss').value),
                 stopWin: parseFloat(document.getElementById('stopWin').value)
             };
             
             botState.stats.currentStake = botState.config.stake;
-            updateStats();
             
             addLog('🚀 Iniciando robô... Aguardando 20 segundos');
             
-            // Contagem regressiva inicial
+            // Contagem regressiva
             let startTime = 20;
-            if(countdownInterval) clearInterval(countdownInterval);
-            
             countdownInterval = setInterval(() => {
                 if(!botState.running) {
                     clearInterval(countdownInterval);
                     return;
                 }
                 
-                document.getElementById('startCounter').innerHTML = `<h2>${startTime}</h2><p>Segundos para iniciar</p>`;
+                addLog(`⏳ Iniciando em ${startTime} segundos...`);
                 startTime--;
                 
                 if(startTime < 0) {
                     clearInterval(countdownInterval);
-                    document.getElementById('startCounter').innerHTML = '<h2>✅</h2><p>Robô ativo</p>';
+                    addLog('✅ Robô iniciado - Analisando mercado...');
                     startTrading();
                 }
             }, 1000);
@@ -425,18 +999,12 @@ HTML = """
             if(countdownInterval) clearInterval(countdownInterval);
             if(tradingInterval) clearInterval(tradingInterval);
             
-            document.getElementById('startCounter').innerHTML = '<h2>20</h2><p>Segundos para iniciar</p>';
-            document.getElementById('cooldownCounter').innerHTML = '<h2>5</h2><p>Segundos pós-venda</p>';
-            document.getElementById('targetInfo').style.display = 'none';
-            document.getElementById('martingaleInfo').style.display = 'none';
-            
             addLog('⏹️ Robô parado');
+            document.getElementById('targetInfo').style.display = 'none';
         }
         
         function startTrading() {
             if(!botState.running) return;
-            
-            addLog('🔍 Analisando mercado...');
             
             tradingInterval = setInterval(() => {
                 if(!botState.running) {
@@ -446,18 +1014,27 @@ HTML = """
                 
                 // Simular dados dos últimos 25 ticks
                 let freq = {};
+                let total = 0;
+                
+                // Gerar percentuais
                 for(let i = 0; i <= 9; i++) {
                     freq[i] = Math.random() * 15;
+                    total += freq[i];
                 }
                 
-                // Encontrar dígito com 0%
-                if(botState.targetDigit === null) {
+                // Normalizar
+                for(let i = 0; i <= 9; i++) {
+                    freq[i] = (freq[i] / total) * 100;
+                }
+                
+                // ESTRATÉGIA: Encontrar dígito com 0%
+                if(botState.targetDigit === null && !botState.inPosition) {
                     for(let i = 0; i <= 9; i++) {
-                        if(freq[i] < 1) {
+                        if(freq[i] < 0.5) {
                             botState.targetDigit = i;
                             document.getElementById('targetInfo').style.display = 'block';
-                            document.getElementById('targetMessage').innerHTML = `🎯 Dígito alvo: ${i} (0%) - Aguardando 8%`;
-                            addLog(`🎯 Dígito alvo encontrado: ${i} (0%)`);
+                            document.getElementById('targetInfo').innerHTML = `🎯 Dígito alvo: <strong>${i}</strong> (0%) - Aguardando 8%`;
+                            addLog(`🎯 Dígito alvo encontrado: ${i} (0% nos últimos 25 ticks)`);
                             break;
                         }
                     }
@@ -467,15 +1044,17 @@ HTML = """
                 if(botState.targetDigit !== null && !botState.inPosition) {
                     if(freq[botState.targetDigit] >= 8) {
                         botState.inPosition = true;
-                        document.getElementById('targetMessage').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando...`;
+                        document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando no próximo tick...`;
                         addLog(`📊 Dígito ${botState.targetDigit} atingiu 8% - Comprando $${botState.stats.currentStake.toFixed(2)}`);
                         
-                        // Simular compra
+                        // COMPRA (simulada)
                         setTimeout(() => {
                             if(!botState.running) return;
                             
-                            // Simular resultado (70% de chance de ganho)
-                            let won = Math.random() > 0.3;
+                            // Verificar se o dígito saiu
+                            let lastDigit = Math.floor(Math.random() * 10);
+                            let won = (lastDigit === botState.targetDigit);
+                            
                             let profit = won ? botState.stats.currentStake * 0.95 : -botState.stats.currentStake;
                             
                             botState.stats.profit += profit;
@@ -485,19 +1064,13 @@ HTML = """
                                 botState.stats.wins++;
                                 botState.stats.losses = 0;
                                 botState.stats.currentStake = botState.config.stake;
-                                addLog(`💰 GANHOU: $${profit.toFixed(2)}`);
-                                document.getElementById('martingaleInfo').style.display = 'none';
+                                addLog(`💰 GANHOU! Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`);
                             } else {
                                 botState.stats.losses++;
                                 botState.stats.currentStake *= botState.config.martingale;
-                                addLog(`❌ PERDEU: $${Math.abs(profit).toFixed(2)}`);
-                                addLog(`📈 Martingale: Nova stake $${botState.stats.currentStake.toFixed(2)}`);
-                                
-                                document.getElementById('martingaleInfo').style.display = 'block';
-                                document.getElementById('martingaleMessage').innerHTML = `Sequência: ${botState.stats.losses} perdas | Stake: $${botState.stats.currentStake.toFixed(2)}`;
+                                addLog(`❌ PERDEU! Dígito ${lastDigit} não saiu. Prejuízo: $${Math.abs(profit).toFixed(2)}`);
+                                addLog(`📈 Martingale ativado - Nova stake: $${botState.stats.currentStake.toFixed(2)}`);
                             }
-                            
-                            updateStats();
                             
                             // Verificar stops
                             if(botState.stats.profit >= botState.config.stopWin) {
@@ -518,26 +1091,31 @@ HTML = """
                             document.getElementById('targetInfo').style.display = 'none';
                             
                             // Cooldown de 5 segundos
-                            let cooldown = 5;
-                            let cdInterval = setInterval(() => {
-                                document.getElementById('cooldownCounter').innerHTML = `<h2>${cooldown}</h2><p>Segundos pós-venda</p>`;
-                                cooldown--;
-                                
-                                if(cooldown < 0) {
-                                    clearInterval(cdInterval);
-                                    document.getElementById('cooldownCounter').innerHTML = '<h2>✅</h2><p>Pronto</p>';
+                            addLog('⏱️ Aguardando 5 segundos para nova operação...');
+                            setTimeout(() => {
+                                if(botState.running) {
+                                    addLog('✅ Pronto para nova análise...');
                                 }
-                            }, 1000);
+                            }, 5000);
                             
-                        }, 2000);
+                        }, 1000);
                     }
                 }
                 
-                updateDigits(freq, botState.targetDigit);
+                // Atualizar gráfico
+                updateBars(freq, botState.targetDigit);
+                updatePrice();
                 botState.frequencies = freq;
                 
-            }, 1000);
+            }, 2000);
         }
+        
+        function manualBuy() {
+            addLog('💰 Compra manual realizada');
+        }
+        
+        // Atualizar preço a cada 2 segundos
+        setInterval(updatePrice, 2000);
     </script>
 </body>
 </html>
