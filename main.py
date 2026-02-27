@@ -1,11 +1,15 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import json
-import random
+import websockets
+import logging
 from collections import deque, Counter
 import time
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -59,7 +63,6 @@ HTML = """
             color: white;
             font-size: 24px;
             font-weight: 600;
-            letter-spacing: -0.5px;
         }
         
         .header p {
@@ -68,7 +71,7 @@ HTML = """
             margin-top: 4px;
         }
         
-        /* Market Info Bar - IGUAL DERIV */
+        /* Market Info Bar */
         .market-bar {
             background: #0f0f14;
             padding: 16px 32px;
@@ -88,7 +91,6 @@ HTML = """
             color: #6a6a7e;
             font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
         
         .market-value {
@@ -161,7 +163,7 @@ HTML = """
             font-size: 12px;
         }
         
-        /* GRÁFICO VERTICAL - IGUAL DERIV */
+        /* GRÁFICO IGUAL DERIV */
         .chart-wrapper {
             background: #14141c;
             border-radius: 12px;
@@ -226,7 +228,6 @@ HTML = """
             font-size: 10px;
         }
         
-        /* Linhas de referência coloridas */
         .ref-line {
             position: absolute;
             left: 0;
@@ -262,7 +263,6 @@ HTML = """
             border: 1px solid #2a2a35;
         }
         
-        /* Barras verticais */
         .bars-container {
             position: absolute;
             bottom: 0;
@@ -341,7 +341,6 @@ HTML = """
             font-size: 11px;
             margin-bottom: 8px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
         
         .price-value {
@@ -365,7 +364,6 @@ HTML = """
             font-size: 11px;
             margin-bottom: 8px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
         
         .prediction-digit {
@@ -458,9 +456,6 @@ HTML = """
             font-size: 14px;
             font-weight: 600;
             margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
         
         .config-row {
@@ -542,7 +537,7 @@ HTML = """
             padding: 16px 24px;
             font-family: 'Courier New', monospace;
             font-size: 12px;
-            height: 120px;
+            height: 150px;
             overflow-y: auto;
             color: #e0e0e0;
         }
@@ -559,13 +554,11 @@ HTML = """
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Estratégia: 0% → 8% → Compra → Martingale → Venda → 5s</p>
+            <p>Dados REAIS da Deriv | Martingale até acertar | Stop Loss protege</p>
         </div>
         
-        <!-- Market Info Bar -->
         <div class="market-bar">
             <div class="market-item">
                 <span class="market-label">MERCADO</span>
@@ -585,7 +578,6 @@ HTML = """
             </div>
         </div>
         
-        <!-- Main Grid -->
         <div class="main-grid">
             <!-- Chart Panel -->
             <div class="chart-panel">
@@ -607,7 +599,6 @@ HTML = """
                 
                 <div class="chart-wrapper">
                     <div class="chart-container">
-                        <!-- Y Axis -->
                         <div class="y-axis">
                             <span>20%</span>
                             <span>16%</span>
@@ -617,9 +608,7 @@ HTML = """
                             <span>0%</span>
                         </div>
                         
-                        <!-- Grid Area -->
                         <div class="grid-area">
-                            <!-- Grid Lines -->
                             <div class="grid-lines">
                                 <div class="grid-line"><span>20%</span></div>
                                 <div class="grid-line"><span>16%</span></div>
@@ -629,7 +618,6 @@ HTML = """
                                 <div class="grid-line"><span>0%</span></div>
                             </div>
                             
-                            <!-- Reference Lines -->
                             <div class="ref-line ref-20">
                                 <span class="ref-label">20.00%</span>
                             </div>
@@ -640,7 +628,6 @@ HTML = """
                                 <span class="ref-label">4.00%</span>
                             </div>
                             
-                            <!-- Bars -->
                             <div class="bars-container" id="barsContainer"></div>
                         </div>
                     </div>
@@ -649,32 +636,28 @@ HTML = """
             
             <!-- Trading Panel -->
             <div class="trading-panel">
-                <!-- Current Price -->
                 <div class="price-box">
                     <div class="price-label">PREÇO ATUAL</div>
                     <div class="price-value" id="currentPrice">---</div>
                 </div>
                 
-                <!-- Prediction -->
                 <div class="prediction-box">
                     <div class="prediction-label">DÍGITO DA PREVISÃO</div>
                     <div class="prediction-digit" id="predictionDigit">-</div>
                     <div class="prediction-status" id="predictionStatus">Aguardando...</div>
                 </div>
                 
-                <!-- Counters -->
                 <div class="counters">
                     <div class="counter">
                         <div class="counter-label">INÍCIO EM</div>
                         <div class="counter-value" id="startCounter">20s</div>
                     </div>
                     <div class="counter">
-                        <div class="counter-label">PRÓXIMO TRADE</div>
-                        <div class="counter-value" id="cooldownCounter">0s</div>
+                        <div class="counter-label">MARTINGALE</div>
+                        <div class="counter-value" id="martingaleCount">0</div>
                     </div>
                 </div>
                 
-                <!-- Profit/Loss -->
                 <div class="profit-box">
                     <div class="profit-row">
                         <span class="profit-label">Lucro/Perda:</span>
@@ -690,13 +673,12 @@ HTML = """
                     </div>
                 </div>
                 
-                <!-- Config -->
                 <div class="config-box">
                     <div class="config-title">⚙️ CONFIGURAÇÕES</div>
                     
                     <div class="config-row">
                         <span class="config-label">Token:</span>
-                        <input type="password" class="config-input token" id="token" placeholder="Opcional">
+                        <input type="password" class="config-input token" id="token" placeholder="Seu token">
                     </div>
                     
                     <div class="config-row">
@@ -720,7 +702,7 @@ HTML = """
                     </div>
                     
                     <div class="button-group">
-                        <button class="btn btn-test" onclick="testConnection()">🔌 TESTAR</button>
+                        <button class="btn btn-test" onclick="connectDeriv()">🔌 CONECTAR</button>
                         <button class="btn btn-start" onclick="startBot()">▶️ INICIAR</button>
                         <button class="btn btn-stop" onclick="stopBot()">⏹️ PARAR</button>
                     </div>
@@ -730,15 +712,19 @@ HTML = """
             </div>
         </div>
         
-        <!-- Logs -->
         <div class="logs-panel" id="logs"></div>
     </div>
     
     <script>
-        // Estado do bot
+        // CONEXÃO REAL COM DERIV API
+        const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
+        const SYMBOL = 'R_100';
+        
+        let derivWS = null;
         let botState = {
             running: false,
             connected: false,
+            token: '',
             targetDigit: null,
             inPosition: false,
             waitingForCompletion: false,
@@ -750,26 +736,23 @@ HTML = """
                 trades: 0,
                 wins: 0,
                 currentStake: 0.35,
-                losses: 0
+                losses: 0,
+                martingaleCount: 0
             },
             config: {
                 stake: 0.35,
                 martingale: 1.15,
                 stopLoss: 10,
                 stopWin: 10
-            }
+            },
+            currentContract: null
         };
         
-        let priceInterval = null;
         let countdownInterval = null;
-        let cooldownInterval = null;
-        let tradingInterval = null;
         
-        // Inicializar barras
         function initBars() {
             let container = document.getElementById('barsContainer');
             let html = '';
-            
             for(let i = 0; i <= 9; i++) {
                 html += `
                     <div class="bar-wrapper" id="bar-wrapper-${i}">
@@ -780,7 +763,6 @@ HTML = """
                     </div>
                 `;
             }
-            
             container.innerHTML = html;
         }
         initBars();
@@ -792,10 +774,7 @@ HTML = """
             entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}`;
             logs.appendChild(entry);
             logs.scrollTop = logs.scrollHeight;
-            
-            while(logs.children.length > 100) {
-                logs.removeChild(logs.firstChild);
-            }
+            while(logs.children.length > 100) logs.removeChild(logs.firstChild);
         }
         
         function updateBars() {
@@ -803,13 +782,10 @@ HTML = """
                 let bar = document.getElementById(`bar-${i}`);
                 let percentEl = document.getElementById(`percent-${i}`);
                 let percent = botState.frequencies[i] || 0;
-                
                 let height = (percent / 20) * 100;
                 if(height > 100) height = 100;
-                
                 bar.style.height = height + '%';
                 percentEl.innerHTML = percent.toFixed(1) + '%';
-                
                 if(i === botState.targetDigit) {
                     bar.classList.add('target');
                 } else {
@@ -818,38 +794,118 @@ HTML = """
             }
         }
         
-        function updatePrice() {
-            // Simular preço Volatility 100 Index (entre 8000 e 20000)
-            let price = (8000 + Math.random() * 12000).toFixed(2);
-            document.getElementById('currentPrice').innerHTML = price;
-            
-            // Extrair último dígito
-            let lastDigit = parseInt(price[price.length - 1]);
-            
-            // Atualizar histórico
-            botState.tickHistory.push(lastDigit);
-            if(botState.tickHistory.length > 25) {
-                botState.tickHistory.shift();
+        function updateStats() {
+            let profitEl = document.getElementById('totalProfit');
+            profitEl.innerHTML = '$' + botState.stats.profit.toFixed(2);
+            profitEl.className = 'profit-value ' + (botState.stats.profit >= 0 ? 'profit-positive' : 'profit-negative');
+            document.getElementById('totalTrades').innerHTML = botState.stats.trades;
+            document.getElementById('currentStake').innerHTML = '$' + botState.stats.currentStake.toFixed(2);
+            document.getElementById('martingaleCount').innerHTML = botState.stats.martingaleCount;
+        }
+        
+        // CONECTAR À DERIV API
+        function connectDeriv() {
+            let token = document.getElementById('token').value;
+            if(!token) {
+                alert('Por favor, insira seu token da Deriv');
+                return;
             }
             
-            // Calcular frequências quando tiver 25 ticks
-            if(botState.tickHistory.length === 25) {
-                let counts = Array(10).fill(0);
-                botState.tickHistory.forEach(d => counts[d]++);
+            botState.token = token;
+            
+            try {
+                derivWS = new WebSocket(DERIV_WS_URL);
                 
-                for(let i = 0; i <= 9; i++) {
-                    botState.frequencies[i] = (counts[i] / 25) * 100;
-                }
+                derivWS.onopen = () => {
+                    // Autorizar com token
+                    derivWS.send(JSON.stringify({
+                        authorize: token
+                    }));
+                };
                 
-                updateBars();
+                derivWS.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    // Verificar autorização
+                    if(data.msg_type === 'authorize') {
+                        if(data.error) {
+                            addLog('❌ Erro de autorização: ' + data.error.message, 'error');
+                            return;
+                        }
+                        
+                        botState.connected = true;
+                        document.getElementById('statusDisplay').innerHTML = '🟢 Conectado';
+                        document.getElementById('statusDisplay').className = 'market-value status-connected';
+                        addLog('✅ Conectado à Deriv', 'success');
+                        
+                        // Inscrever para ticks do R_100
+                        derivWS.send(JSON.stringify({
+                            ticks: SYMBOL,
+                            subscribe: 1
+                        }));
+                    }
+                    
+                    // Processar ticks
+                    if(data.msg_type === 'tick' && data.tick) {
+                        const tick = data.tick;
+                        const price = tick.quote;
+                        const lastDigit = getLastDigit(price);
+                        
+                        document.getElementById('currentPrice').innerHTML = price.toFixed(2);
+                        
+                        // Atualizar histórico
+                        botState.tickHistory.push(lastDigit);
+                        if(botState.tickHistory.length > 25) {
+                            botState.tickHistory.shift();
+                        }
+                        
+                        // Calcular frequências
+                        if(botState.tickHistory.length === 25) {
+                            let counts = Array(10).fill(0);
+                            botState.tickHistory.forEach(d => counts[d]++);
+                            for(let i = 0; i <= 9; i++) {
+                                botState.frequencies[i] = (counts[i] / 25) * 100;
+                            }
+                            updateBars();
+                            
+                            // Executar estratégia
+                            if(botState.running) {
+                                executeStrategy(lastDigit);
+                            }
+                        }
+                    }
+                };
                 
-                // Executar estratégia se o bot estiver rodando
-                if(botState.running) {
-                    executeStrategy(lastDigit);
-                }
+                derivWS.onerror = (error) => {
+                    addLog('❌ Erro WebSocket: ' + error, 'error');
+                };
+                
+                derivWS.onclose = () => {
+                    botState.connected = false;
+                    document.getElementById('statusDisplay').innerHTML = '🔴 Desconectado';
+                    document.getElementById('statusDisplay').className = 'market-value status-disconnected';
+                    addLog('❌ Desconectado da Deriv', 'error');
+                    
+                    // Tentar reconectar
+                    if(botState.running) {
+                        setTimeout(connectDeriv, 5000);
+                    }
+                };
+                
+            } catch(error) {
+                addLog('❌ Erro ao conectar: ' + error, 'error');
             }
         }
         
+        function getLastDigit(price) {
+            let priceStr = price.toString();
+            if(priceStr.includes('.')) {
+                priceStr = priceStr.replace('.', '');
+            }
+            return parseInt(priceStr[priceStr.length - 1]);
+        }
+        
+        // ESTRATÉGIA - MARTINGALE ATÉ ACERTAR
         function executeStrategy(lastDigit) {
             // PASSO 1: Analisar gráfico e identificar dígito com 0%
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingForCompletion) {
@@ -857,6 +913,7 @@ HTML = """
                     if(botState.frequencies[i] < 0.5) {
                         botState.targetDigit = i;
                         botState.waitingForCompletion = true;
+                        botState.stats.martingaleCount = 0;
                         
                         document.getElementById('predictionDigit').innerHTML = i;
                         document.getElementById('predictionStatus').innerHTML = 'Aguardando 8%';
@@ -875,7 +932,7 @@ HTML = """
                     botState.entryTriggered = true;
                     
                     document.getElementById('predictionStatus').innerHTML = '📊 Atingiu 8%! Comprando...';
-                    document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando no próximo tick...`;
+                    document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando...`;
                     
                     addLog(`📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando...`, 'warning');
                     
@@ -884,105 +941,95 @@ HTML = """
                         if(!botState.running) return;
                         
                         botState.inPosition = true;
-                        addLog(`✅ COMPRA: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
+                        botState.currentContract = {
+                            digit: botState.targetDigit,
+                            stake: botState.stats.currentStake,
+                            entryTick: lastDigit
+                        };
                         
-                        // PASSO 4: Aguardar resultado
-                        setTimeout(() => {
-                            if(!botState.running) return;
-                            
-                            // Gerar próximo tick
-                            let nextPrice = (8000 + Math.random() * 12000).toFixed(2);
-                            let nextDigit = parseInt(nextPrice[nextPrice.length - 1]);
-                            
-                            // PASSO 5: Verificar se o número da previsão saiu
-                            let won = (nextDigit === botState.targetDigit);
-                            
-                            if(won) {
-                                // PASSO 6: Vender (ganhou)
-                                let profit = botState.stats.currentStake * 0.95;
-                                botState.stats.profit += profit;
-                                botState.stats.trades++;
-                                botState.stats.wins++;
-                                botState.stats.losses = 0;
-                                botState.stats.currentStake = botState.config.stake;
-                                
-                                addLog(`💰 VENDA: Dígito ${nextDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
-                            } else {
-                                // PASSO 5: Aplicar martingale (perdeu)
-                                let loss = -botState.stats.currentStake;
-                                botState.stats.profit += loss;
-                                botState.stats.trades++;
-                                botState.stats.losses++;
-                                botState.stats.currentStake *= botState.config.martingale;
-                                
-                                addLog(`❌ PERDA: Dígito ${nextDigit} não saiu! Prejuízo: $${Math.abs(loss).toFixed(2)}`, 'error');
-                                addLog(`📈 Martingale: Nova stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
-                            }
-                            
-                            updateStats();
-                            
-                            // Verificar stops
-                            if(botState.stats.profit >= botState.config.stopWin) {
-                                addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
-                                stopBot();
-                                return;
-                            }
-                            
-                            if(botState.stats.profit <= -botState.config.stopLoss) {
-                                addLog('🛑 STOP LOSS ATINGIDO!', 'error');
-                                stopBot();
-                                return;
-                            }
-                            
-                            // PASSO 7: Reset e aguardar 5 segundos para começar de novo
-                            botState.inPosition = false;
-                            botState.targetDigit = null;
-                            botState.entryTriggered = false;
-                            
-                            document.getElementById('predictionDigit').innerHTML = '-';
-                            document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
-                            document.getElementById('targetInfo').style.display = 'none';
-                            
-                            addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
-                            
-                            let cooldown = 5;
-                            cooldownInterval = setInterval(() => {
-                                document.getElementById('cooldownCounter').innerHTML = cooldown + 's';
-                                cooldown--;
-                                
-                                if(cooldown < 0) {
-                                    clearInterval(cooldownInterval);
-                                    document.getElementById('cooldownCounter').innerHTML = 'Pronto';
-                                    botState.waitingForCompletion = false;
-                                    addLog('✅ Pronto para nova análise...', 'success');
-                                }
-                            }, 1000);
-                            
-                        }, 2000); // Aguardar próximo tick
-                    }, 100); // Próximo tick
+                        addLog(`✅ COMPRA ${botState.stats.martingaleCount + 1}: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
+                        
+                    }, 100);
+                }
+            }
+            
+            // PASSO 4: Se está em posição, verificar se o dígito saiu
+            if(botState.inPosition && botState.currentContract) {
+                if(lastDigit === botState.targetDigit) {
+                    // GANHOU! Dígito saiu
+                    let profit = botState.stats.currentStake * 0.95;
+                    botState.stats.profit += profit;
+                    botState.stats.trades++;
+                    botState.stats.wins++;
+                    botState.stats.losses = 0;
+                    
+                    addLog(`💰 VENDA: Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
+                    
+                    // Reset para nova operação
+                    botState.inPosition = false;
+                    botState.targetDigit = null;
+                    botState.entryTriggered = false;
+                    botState.currentContract = null;
+                    botState.stats.currentStake = botState.config.stake;
+                    botState.stats.martingaleCount = 0;
+                    
+                    document.getElementById('predictionDigit').innerHTML = '-';
+                    document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
+                    document.getElementById('targetInfo').style.display = 'none';
+                    
+                    updateStats();
+                    
+                    // Verificar stop win
+                    if(botState.stats.profit >= botState.config.stopWin) {
+                        addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
+                        stopBot();
+                        return;
+                    }
+                    
+                    // PASSO 7: Aguardar 5 segundos para começar de novo
+                    addLog('⏱️ Aguardando 5 segundos...', 'info');
+                    setTimeout(() => {
+                        botState.waitingForCompletion = false;
+                        addLog('✅ Pronto para nova análise', 'success');
+                    }, 5000);
+                    
+                } else {
+                    // PERDEU - Aplicar martingale
+                    let loss = -botState.stats.currentStake;
+                    botState.stats.profit += loss;
+                    botState.stats.losses++;
+                    botState.stats.martingaleCount++;
+                    
+                    // Verificar stop loss ANTES de aplicar martingale
+                    if(botState.stats.profit <= -botState.config.stopLoss) {
+                        addLog('🛑 STOP LOSS ATINGIDO!', 'error');
+                        stopBot();
+                        return;
+                    }
+                    
+                    // Aplicar martingale para próxima tentativa
+                    botState.stats.currentStake *= botState.config.martingale;
+                    botState.inPosition = false; // Libera para nova compra
+                    
+                    addLog(`❌ PERDA ${botState.stats.martingaleCount}: Dígito ${lastDigit} não saiu`, 'error');
+                    addLog(`📈 Martingale ${botState.stats.martingaleCount}: Nova stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
+                    
+                    updateStats();
+                    
+                    // Aguardar próximo tick para comprar novamente
+                    setTimeout(() => {
+                        if(botState.running && botState.targetDigit !== null) {
+                            botState.entryTriggered = false; // Permite nova entrada
+                            addLog(`🔄 Tentando novamente com stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
+                        }
+                    }, 100);
                 }
             }
         }
         
-        function updateStats() {
-            let profitEl = document.getElementById('totalProfit');
-            profitEl.innerHTML = '$' + botState.stats.profit.toFixed(2);
-            profitEl.className = 'profit-value ' + (botState.stats.profit >= 0 ? 'profit-positive' : 'profit-negative');
-            
-            document.getElementById('totalTrades').innerHTML = botState.stats.trades;
-            document.getElementById('currentStake').innerHTML = '$' + botState.stats.currentStake.toFixed(2);
-        }
-        
-        function testConnection() {
-            botState.connected = true;
-            document.getElementById('statusDisplay').innerHTML = '🟢 Conectado';
-            document.getElementById('statusDisplay').className = 'market-value status-connected';
-            addLog('✅ Conectado à Deriv', 'success');
-        }
-        
         function startBot() {
             if(!botState.connected) {
-                alert('Teste a conexão primeiro!');
+                alert('Conecte-se à Deriv primeiro!');
                 return;
             }
             
@@ -999,16 +1046,10 @@ HTML = """
             
             addLog('🚀 Iniciando robô... Aguardando 20 segundos', 'warning');
             
-            // Iniciar preço em tempo real
-            if(priceInterval) clearInterval(priceInterval);
-            priceInterval = setInterval(updatePrice, 1000);
-            
-            // Contagem regressiva inicial
             let startTime = 20;
             countdownInterval = setInterval(() => {
                 document.getElementById('startCounter').innerHTML = startTime + 's';
                 startTime--;
-                
                 if(startTime < 0) {
                     clearInterval(countdownInterval);
                     document.getElementById('startCounter').innerHTML = 'Ativo';
@@ -1019,16 +1060,14 @@ HTML = """
         
         function stopBot() {
             botState.running = false;
-            
-            if(priceInterval) clearInterval(priceInterval);
             if(countdownInterval) clearInterval(countdownInterval);
-            if(cooldownInterval) clearInterval(cooldownInterval);
             
             document.getElementById('startCounter').innerHTML = '20s';
-            document.getElementById('cooldownCounter').innerHTML = '0s';
             document.getElementById('targetInfo').style.display = 'none';
             document.getElementById('predictionDigit').innerHTML = '-';
             document.getElementById('predictionStatus').innerHTML = 'Parado';
+            
+            if(derivWS) derivWS.close();
             
             addLog('⏹️ Robô parado', 'error');
         }
