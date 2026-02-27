@@ -1,25 +1,8 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
-import asyncio
-import json
-import websockets
-import logging
-from collections import deque, Counter
-import time
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import uvicorn
 
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 HTML = """
 <!DOCTYPE html>
@@ -33,7 +16,7 @@ HTML = """
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         
         body {
@@ -43,18 +26,16 @@ HTML = """
         }
         
         .container {
-            max-width: 1600px;
+            max-width: 1400px;
             margin: 0 auto;
             background: #111117;
-            border-radius: 24px;
+            border-radius: 16px;
             overflow: hidden;
             border: 1px solid #2a2a35;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.8);
         }
         
-        /* Header */
         .header {
-            background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%);
+            background: #1e1e2a;
             padding: 24px 32px;
             border-bottom: 1px solid #2a2a35;
         }
@@ -71,14 +52,12 @@ HTML = """
             margin-top: 4px;
         }
         
-        /* Market Info Bar */
         .market-bar {
             background: #0f0f14;
             padding: 16px 32px;
             border-bottom: 1px solid #2a2a35;
             display: flex;
             gap: 48px;
-            flex-wrap: wrap;
         }
         
         .market-item {
@@ -103,22 +82,12 @@ HTML = """
             color: #ff4444;
         }
         
-        .status-connected {
-            color: #4caf50;
-        }
-        
-        .status-disconnected {
-            color: #ff4444;
-        }
-        
-        /* Main Grid */
         .main-grid {
             display: grid;
             grid-template-columns: 1fr 380px;
             gap: 0;
         }
         
-        /* Chart Panel */
         .chart-panel {
             padding: 24px;
             border-right: 1px solid #2a2a35;
@@ -128,7 +97,6 @@ HTML = """
         .chart-header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
             margin-bottom: 24px;
         }
         
@@ -138,32 +106,14 @@ HTML = """
             font-weight: 500;
         }
         
-        .chart-controls {
-            display: flex;
-            gap: 16px;
-        }
-        
-        .control-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .control-item label {
-            color: #8a8a9e;
-            font-size: 12px;
-        }
-        
-        .control-item select, .control-item input {
+        .chart-controls select {
             background: #1e1e2a;
             border: 1px solid #2a2a35;
             color: white;
             padding: 6px 12px;
             border-radius: 4px;
-            font-size: 12px;
         }
         
-        /* GRÁFICO IGUAL DERIV */
         .chart-wrapper {
             background: #14141c;
             border-radius: 12px;
@@ -173,8 +123,7 @@ HTML = """
         
         .chart-container {
             position: relative;
-            height: 450px;
-            width: 100%;
+            height: 400px;
         }
         
         .y-axis {
@@ -186,14 +135,10 @@ HTML = """
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            padding: 10px 0;
-        }
-        
-        .y-axis span {
             color: #6a6a7e;
             font-size: 11px;
             text-align: right;
-            padding-right: 8px;
+            padding: 10px 8px 10px 0;
         }
         
         .grid-area {
@@ -211,21 +156,11 @@ HTML = """
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            pointer-events: none;
         }
         
         .grid-line {
             border-top: 1px dashed #2a2a35;
             height: 0;
-            position: relative;
-        }
-        
-        .grid-line span {
-            position: absolute;
-            left: -30px;
-            top: -8px;
-            color: #6a6a7e;
-            font-size: 10px;
         }
         
         .ref-line {
@@ -233,23 +168,11 @@ HTML = """
             left: 0;
             right: 0;
             height: 2px;
-            pointer-events: none;
         }
         
-        .ref-20 {
-            top: 20%;
-            border-top: 2px solid #ff4444;
-        }
-        
-        .ref-8 {
-            top: 68%;
-            border-top: 2px solid #ffaa00;
-        }
-        
-        .ref-4 {
-            top: 84%;
-            border-top: 2px solid #4caf50;
-        }
+        .ref-20 { top: 20%; border-top: 2px solid #ff4444; }
+        .ref-8 { top: 68%; border-top: 2px solid #ffaa00; }
+        .ref-4 { top: 84%; border-top: 2px solid #4caf50; }
         
         .ref-label {
             position: absolute;
@@ -273,7 +196,6 @@ HTML = """
             align-items: flex-end;
             justify-content: space-around;
             padding: 0 5px;
-            z-index: 5;
         }
         
         .bar-wrapper {
@@ -281,22 +203,19 @@ HTML = """
             flex-direction: column;
             align-items: center;
             width: 35px;
-            height: 100%;
-            justify-content: flex-end;
-            position: relative;
         }
         
         .bar {
             width: 28px;
             background: linear-gradient(180deg, #ff6b6b 0%, #ff4444 100%);
             border-radius: 4px 4px 0 0;
-            transition: height 0.3s ease;
+            transition: height 0.3s;
             position: relative;
         }
         
         .bar.target {
             background: linear-gradient(180deg, #ffaa00 0%, #ff8800 100%);
-            box-shadow: 0 0 15px rgba(255,170,0,0.5);
+            box-shadow: 0 0 15px #ffaa00;
         }
         
         .bar-percent {
@@ -306,22 +225,19 @@ HTML = """
             transform: translateX(-50%);
             color: white;
             font-size: 11px;
-            font-weight: 600;
-            white-space: nowrap;
             background: #1e1e2a;
             padding: 2px 6px;
             border-radius: 4px;
             border: 1px solid #2a2a35;
+            white-space: nowrap;
         }
         
         .bar-label {
             margin-top: 8px;
             color: white;
-            font-size: 13px;
-            font-weight: 500;
+            font-size: 12px;
         }
         
-        /* Trading Panel */
         .trading-panel {
             padding: 24px;
             background: #0f0f14;
@@ -346,8 +262,8 @@ HTML = """
         .price-value {
             color: white;
             font-size: 42px;
-            font-weight: 700;
             font-family: 'Courier New', monospace;
+            font-weight: 700;
         }
         
         .prediction-box {
@@ -362,8 +278,8 @@ HTML = """
         .prediction-label {
             color: #8a8a9e;
             font-size: 11px;
-            margin-bottom: 8px;
             text-transform: uppercase;
+            margin-bottom: 8px;
         }
         
         .prediction-digit {
@@ -371,12 +287,6 @@ HTML = """
             font-size: 64px;
             font-weight: 700;
             line-height: 1;
-            margin-bottom: 8px;
-        }
-        
-        .prediction-status {
-            color: #ffaa00;
-            font-size: 13px;
         }
         
         .counters {
@@ -397,13 +307,13 @@ HTML = """
         .counter-label {
             color: #8a8a9e;
             font-size: 10px;
-            margin-bottom: 8px;
             text-transform: uppercase;
+            margin-bottom: 8px;
         }
         
         .counter-value {
             color: #ffaa00;
-            font-size: 28px;
+            font-size: 24px;
             font-weight: 700;
         }
         
@@ -436,13 +346,8 @@ HTML = """
             font-weight: 600;
         }
         
-        .profit-positive {
-            color: #4caf50;
-        }
-        
-        .profit-negative {
-            color: #ff4444;
-        }
+        .profit-positive { color: #4caf50; }
+        .profit-negative { color: #ff4444; }
         
         .config-box {
             background: #1a1a24;
@@ -474,20 +379,20 @@ HTML = """
             background: #0f0f14;
             border: 1px solid #2a2a35;
             color: white;
-            padding: 8px 12px;
+            padding: 8px;
             border-radius: 4px;
             width: 100px;
             text-align: right;
         }
         
-        .config-input.token {
+        .token-input {
             width: 140px;
         }
         
         .button-group {
             display: flex;
             gap: 8px;
-            margin: 20px 0 12px;
+            margin: 20px 0;
         }
         
         .btn {
@@ -497,35 +402,20 @@ HTML = """
             border-radius: 6px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s;
         }
         
-        .btn-test {
-            background: #4a4a5a;
-            color: white;
-        }
+        .btn-test { background: #4a4a5a; color: white; }
+        .btn-start { background: #4caf50; color: white; }
+        .btn-stop { background: #f44336; color: white; }
         
-        .btn-start {
-            background: #4caf50;
-            color: white;
-        }
-        
-        .btn-stop {
-            background: #f44336;
-            color: white;
-        }
-        
-        .btn:hover {
-            transform: translateY(-2px);
-            filter: brightness(1.1);
-        }
+        .status-connected { color: #4caf50; }
+        .status-disconnected { color: #ff4444; }
         
         .target-info {
             background: #1e1e2a;
             border-left: 4px solid #ffaa00;
             padding: 12px;
             border-radius: 4px;
-            margin-top: 16px;
             color: white;
             font-size: 13px;
             display: none;
@@ -535,28 +425,19 @@ HTML = """
             background: #0a0a0f;
             border-top: 1px solid #2a2a35;
             padding: 16px 24px;
-            font-family: 'Courier New', monospace;
+            font-family: monospace;
             font-size: 12px;
-            height: 150px;
+            height: 120px;
             overflow-y: auto;
             color: #e0e0e0;
         }
-        
-        .log-entry {
-            padding: 4px 0;
-            border-bottom: 1px solid #1e1e2a;
-        }
-        
-        .log-success { color: #4caf50; }
-        .log-error { color: #f44336; }
-        .log-warning { color: #ffaa00; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Dados REAIS da Deriv | Martingale até acertar | Stop Loss protege</p>
+            <p>Conexão direta com API da Deriv | Martingale até acertar</p>
         </div>
         
         <div class="market-bar">
@@ -569,32 +450,15 @@ HTML = """
                 <span class="market-value highlight">Dígito Matches</span>
             </div>
             <div class="market-item">
-                <span class="market-label">DURAÇÃO</span>
-                <span class="market-value">1 tick</span>
-            </div>
-            <div class="market-item">
                 <span class="market-label">STATUS</span>
                 <span class="market-value" id="statusDisplay">🔴 Desconectado</span>
             </div>
         </div>
         
         <div class="main-grid">
-            <!-- Chart Panel -->
             <div class="chart-panel">
                 <div class="chart-header">
-                    <div class="chart-title">📊 Last Digit Statistics - Últimos 25 ticks</div>
-                    <div class="chart-controls">
-                        <div class="control-item">
-                            <label>Market:</label>
-                            <select id="marketSelect">
-                                <option value="R_100" selected>Volatility 100 Index</option>
-                            </select>
-                        </div>
-                        <div class="control-item">
-                            <label>Ticks:</label>
-                            <input type="number" id="tickCount" value="25" readonly>
-                        </div>
-                    </div>
+                    <div class="chart-title">📊 Últimos 25 dígitos</div>
                 </div>
                 
                 <div class="chart-wrapper">
@@ -610,22 +474,22 @@ HTML = """
                         
                         <div class="grid-area">
                             <div class="grid-lines">
-                                <div class="grid-line"><span>20%</span></div>
-                                <div class="grid-line"><span>16%</span></div>
-                                <div class="grid-line"><span>12%</span></div>
-                                <div class="grid-line"><span>8%</span></div>
-                                <div class="grid-line"><span>4%</span></div>
-                                <div class="grid-line"><span>0%</span></div>
+                                <div class="grid-line"></div>
+                                <div class="grid-line"></div>
+                                <div class="grid-line"></div>
+                                <div class="grid-line"></div>
+                                <div class="grid-line"></div>
+                                <div class="grid-line"></div>
                             </div>
                             
                             <div class="ref-line ref-20">
-                                <span class="ref-label">20.00%</span>
+                                <span class="ref-label">20%</span>
                             </div>
                             <div class="ref-line ref-8">
-                                <span class="ref-label">8.00%</span>
+                                <span class="ref-label">8%</span>
                             </div>
                             <div class="ref-line ref-4">
-                                <span class="ref-label">4.00%</span>
+                                <span class="ref-label">4%</span>
                             </div>
                             
                             <div class="bars-container" id="barsContainer"></div>
@@ -634,7 +498,6 @@ HTML = """
                 </div>
             </div>
             
-            <!-- Trading Panel -->
             <div class="trading-panel">
                 <div class="price-box">
                     <div class="price-label">PREÇO ATUAL</div>
@@ -644,17 +507,17 @@ HTML = """
                 <div class="prediction-box">
                     <div class="prediction-label">DÍGITO DA PREVISÃO</div>
                     <div class="prediction-digit" id="predictionDigit">-</div>
-                    <div class="prediction-status" id="predictionStatus">Aguardando...</div>
+                    <div id="predictionStatus" style="color: #ffaa00; font-size: 12px;">Aguardando</div>
                 </div>
                 
                 <div class="counters">
                     <div class="counter">
-                        <div class="counter-label">INÍCIO EM</div>
+                        <div class="counter-label">INÍCIO</div>
                         <div class="counter-value" id="startCounter">20s</div>
                     </div>
                     <div class="counter">
-                        <div class="counter-label">MARTINGALE</div>
-                        <div class="counter-value" id="martingaleCount">0</div>
+                        <div class="counter-label">GALE</div>
+                        <div class="counter-value" id="galeCount">0</div>
                     </div>
                 </div>
                 
@@ -662,10 +525,6 @@ HTML = """
                     <div class="profit-row">
                         <span class="profit-label">Lucro/Perda:</span>
                         <span class="profit-value" id="totalProfit">$0.00</span>
-                    </div>
-                    <div class="profit-row">
-                        <span class="profit-label">Trades:</span>
-                        <span class="profit-value" id="totalTrades">0</span>
                     </div>
                     <div class="profit-row">
                         <span class="profit-label">Stake Atual:</span>
@@ -678,27 +537,22 @@ HTML = """
                     
                     <div class="config-row">
                         <span class="config-label">Token:</span>
-                        <input type="password" class="config-input token" id="token" placeholder="Seu token">
+                        <input type="password" class="config-input token-input" id="token" value="YOUR_TOKEN_HERE">
                     </div>
                     
                     <div class="config-row">
-                        <span class="config-label">Stake Inicial:</span>
+                        <span class="config-label">Stake:</span>
                         <input type="number" class="config-input" id="stake" value="0.35" step="0.01" min="0.35">
                     </div>
                     
                     <div class="config-row">
-                        <span class="config-label">Martingale:</span>
-                        <input type="number" class="config-input" id="martingale" value="1.15" step="0.01" min="1.0">
+                        <span class="config-label">Gale:</span>
+                        <input type="number" class="config-input" id="gale" value="1.15" step="0.01">
                     </div>
                     
                     <div class="config-row">
-                        <span class="config-label">Stop Loss ($):</span>
-                        <input type="number" class="config-input" id="stopLoss" value="10" step="0.01">
-                    </div>
-                    
-                    <div class="config-row">
-                        <span class="config-label">Stop Win ($):</span>
-                        <input type="number" class="config-input" id="stopWin" value="10" step="0.01">
+                        <span class="config-label">Stop Loss:</span>
+                        <input type="number" class="config-input" id="stopLoss" value="10">
                     </div>
                     
                     <div class="button-group">
@@ -716,76 +570,71 @@ HTML = """
     </div>
     
     <script>
-        // CONEXÃO REAL COM DERIV API
-        const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
+        // Configuração da Deriv
+        const DERIV_WS = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
         const SYMBOL = 'R_100';
         
-        let derivWS = null;
+        // Estado do bot
+        let ws = null;
         let botState = {
             running: false,
             connected: false,
             token: '',
             targetDigit: null,
             inPosition: false,
-            waitingForCompletion: false,
+            waitingCompletion: false,
             entryTriggered: false,
             tickHistory: [],
             frequencies: Array(10).fill(0),
             stats: {
                 profit: 0,
-                trades: 0,
-                wins: 0,
                 currentStake: 0.35,
-                losses: 0,
-                martingaleCount: 0
+                galeCount: 0
             },
             config: {
                 stake: 0.35,
-                martingale: 1.15,
-                stopLoss: 10,
-                stopWin: 10
-            },
-            currentContract: null
+                gale: 1.15,
+                stopLoss: 10
+            }
         };
         
         let countdownInterval = null;
+        let logs = [];
         
+        // Inicializar barras
         function initBars() {
-            let container = document.getElementById('barsContainer');
             let html = '';
             for(let i = 0; i <= 9; i++) {
                 html += `
-                    <div class="bar-wrapper" id="bar-wrapper-${i}">
-                        <div class="bar" id="bar-${i}">
+                    <div class="bar-wrapper">
+                        <div class="bar" id="bar-${i}" style="height: 0%">
                             <span class="bar-percent" id="percent-${i}">0.0%</span>
                         </div>
                         <div class="bar-label">${i}</div>
                     </div>
                 `;
             }
-            container.innerHTML = html;
+            document.getElementById('barsContainer').innerHTML = html;
         }
         initBars();
         
-        function addLog(message, type = 'info') {
-            let logs = document.getElementById('logs');
+        function addLog(msg, type = 'info') {
+            let logsDiv = document.getElementById('logs');
             let entry = document.createElement('div');
-            entry.className = `log-entry log-${type}`;
-            entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}`;
-            logs.appendChild(entry);
-            logs.scrollTop = logs.scrollHeight;
-            while(logs.children.length > 100) logs.removeChild(logs.firstChild);
+            entry.style.color = type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#e0e0e0';
+            entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logsDiv.appendChild(entry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
         }
         
         function updateBars() {
             for(let i = 0; i <= 9; i++) {
                 let bar = document.getElementById(`bar-${i}`);
-                let percentEl = document.getElementById(`percent-${i}`);
                 let percent = botState.frequencies[i] || 0;
                 let height = (percent / 20) * 100;
-                if(height > 100) height = 100;
-                bar.style.height = height + '%';
-                percentEl.innerHTML = percent.toFixed(1) + '%';
+                bar.style.height = Math.min(height, 100) + '%';
+                document.getElementById(`percent-${i}`).innerHTML = percent.toFixed(1) + '%';
+                
                 if(i === botState.targetDigit) {
                     bar.classList.add('target');
                 } else {
@@ -798,15 +647,14 @@ HTML = """
             let profitEl = document.getElementById('totalProfit');
             profitEl.innerHTML = '$' + botState.stats.profit.toFixed(2);
             profitEl.className = 'profit-value ' + (botState.stats.profit >= 0 ? 'profit-positive' : 'profit-negative');
-            document.getElementById('totalTrades').innerHTML = botState.stats.trades;
             document.getElementById('currentStake').innerHTML = '$' + botState.stats.currentStake.toFixed(2);
-            document.getElementById('martingaleCount').innerHTML = botState.stats.martingaleCount;
+            document.getElementById('galeCount').innerHTML = botState.stats.galeCount;
         }
         
-        // CONECTAR À DERIV API
+        // CONEXÃO DERIV
         function connectDeriv() {
             let token = document.getElementById('token').value;
-            if(!token) {
+            if(!token || token === 'YOUR_TOKEN_HERE') {
                 alert('Por favor, insira seu token da Deriv');
                 return;
             }
@@ -814,22 +662,19 @@ HTML = """
             botState.token = token;
             
             try {
-                derivWS = new WebSocket(DERIV_WS_URL);
+                ws = new WebSocket(DERIV_WS);
                 
-                derivWS.onopen = () => {
-                    // Autorizar com token
-                    derivWS.send(JSON.stringify({
-                        authorize: token
-                    }));
+                ws.onopen = () => {
+                    // Autorizar
+                    ws.send(JSON.stringify({ authorize: token }));
                 };
                 
-                derivWS.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
+                ws.onmessage = (event) => {
+                    let data = JSON.parse(event.data);
                     
-                    // Verificar autorização
                     if(data.msg_type === 'authorize') {
                         if(data.error) {
-                            addLog('❌ Erro de autorização: ' + data.error.message, 'error');
+                            addLog('❌ Erro token: ' + data.error.message, 'error');
                             return;
                         }
                         
@@ -838,20 +683,20 @@ HTML = """
                         document.getElementById('statusDisplay').className = 'market-value status-connected';
                         addLog('✅ Conectado à Deriv', 'success');
                         
-                        // Inscrever para ticks do R_100
-                        derivWS.send(JSON.stringify({
+                        // Assinar ticks
+                        ws.send(JSON.stringify({
                             ticks: SYMBOL,
                             subscribe: 1
                         }));
                     }
                     
-                    // Processar ticks
                     if(data.msg_type === 'tick' && data.tick) {
-                        const tick = data.tick;
-                        const price = tick.quote;
-                        const lastDigit = getLastDigit(price);
-                        
+                        let price = data.tick.quote;
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
+                        
+                        // Extrair último dígito
+                        let priceStr = price.toString().replace('.', '');
+                        let lastDigit = parseInt(priceStr[priceStr.length - 1]);
                         
                         // Atualizar histórico
                         botState.tickHistory.push(lastDigit);
@@ -868,7 +713,6 @@ HTML = """
                             }
                             updateBars();
                             
-                            // Executar estratégia
                             if(botState.running) {
                                 executeStrategy(lastDigit);
                             }
@@ -876,200 +720,142 @@ HTML = """
                     }
                 };
                 
-                derivWS.onerror = (error) => {
-                    addLog('❌ Erro WebSocket: ' + error, 'error');
-                };
-                
-                derivWS.onclose = () => {
+                ws.onclose = () => {
                     botState.connected = false;
                     document.getElementById('statusDisplay').innerHTML = '🔴 Desconectado';
                     document.getElementById('statusDisplay').className = 'market-value status-disconnected';
-                    addLog('❌ Desconectado da Deriv', 'error');
-                    
-                    // Tentar reconectar
-                    if(botState.running) {
-                        setTimeout(connectDeriv, 5000);
-                    }
+                    addLog('❌ Desconectado', 'error');
                 };
                 
-            } catch(error) {
-                addLog('❌ Erro ao conectar: ' + error, 'error');
+            } catch(e) {
+                addLog('❌ Erro: ' + e.message, 'error');
             }
         }
         
-        function getLastDigit(price) {
-            let priceStr = price.toString();
-            if(priceStr.includes('.')) {
-                priceStr = priceStr.replace('.', '');
-            }
-            return parseInt(priceStr[priceStr.length - 1]);
-        }
-        
-        // ESTRATÉGIA - MARTINGALE ATÉ ACERTAR
+        // ESTRATÉGIA
         function executeStrategy(lastDigit) {
-            // PASSO 1: Analisar gráfico e identificar dígito com 0%
-            if(botState.targetDigit === null && !botState.inPosition && !botState.waitingForCompletion) {
+            // PASSO 1: Encontrar dígito 0%
+            if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 for(let i = 0; i <= 9; i++) {
                     if(botState.frequencies[i] < 0.5) {
                         botState.targetDigit = i;
-                        botState.waitingForCompletion = true;
-                        botState.stats.martingaleCount = 0;
+                        botState.waitingCompletion = true;
+                        botState.stats.galeCount = 0;
                         
                         document.getElementById('predictionDigit').innerHTML = i;
-                        document.getElementById('predictionStatus').innerHTML = 'Aguardando 8%';
                         document.getElementById('targetInfo').style.display = 'block';
-                        document.getElementById('targetInfo').innerHTML = `🎯 Dígito da previsão: ${i} (0%) - Aguardando 8%`;
+                        document.getElementById('targetInfo').innerHTML = `🎯 Dígito ${i} (0%) - Aguardando 8%`;
                         
-                        addLog(`🎯 Dígito da previsão: ${i} (0% nos últimos 25 ticks)`, 'warning');
+                        addLog(`🎯 Dígito alvo: ${i} (0%)`, 'warning');
                         break;
                     }
                 }
             }
             
-            // PASSO 2: Aguardar esse número chegar a 8%
+            // PASSO 2: Aguardar 8%
             if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered) {
                 if(botState.frequencies[botState.targetDigit] >= 8) {
                     botState.entryTriggered = true;
-                    
-                    document.getElementById('predictionStatus').innerHTML = '📊 Atingiu 8%! Comprando...';
                     document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando...`;
+                    addLog(`📊 Atingiu 8%! Comprando...`, 'warning');
                     
-                    addLog(`📊 Dígito ${botState.targetDigit} atingiu 8%! Comprando...`, 'warning');
-                    
-                    // PASSO 3: Comprar no próximo tick
+                    // PASSO 3: Comprar
                     setTimeout(() => {
                         if(!botState.running) return;
                         
                         botState.inPosition = true;
-                        botState.currentContract = {
-                            digit: botState.targetDigit,
-                            stake: botState.stats.currentStake,
-                            entryTick: lastDigit
-                        };
-                        
-                        addLog(`✅ COMPRA ${botState.stats.martingaleCount + 1}: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
-                        
+                        botState.stats.galeCount++;
+                        addLog(`✅ COMPRA ${botState.stats.galeCount}: $${botState.stats.currentStake.toFixed(2)}`, 'success');
                     }, 100);
                 }
             }
             
-            // PASSO 4: Se está em posição, verificar se o dígito saiu
-            if(botState.inPosition && botState.currentContract) {
+            // PASSO 4: Verificar resultado
+            if(botState.inPosition && botState.targetDigit !== null) {
                 if(lastDigit === botState.targetDigit) {
-                    // GANHOU! Dígito saiu
+                    // GANHOU
                     let profit = botState.stats.currentStake * 0.95;
                     botState.stats.profit += profit;
-                    botState.stats.trades++;
-                    botState.stats.wins++;
-                    botState.stats.losses = 0;
                     
-                    addLog(`💰 VENDA: Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
+                    addLog(`💰 VENDA! Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
                     
-                    // Reset para nova operação
+                    // Reset
                     botState.inPosition = false;
                     botState.targetDigit = null;
                     botState.entryTriggered = false;
-                    botState.currentContract = null;
                     botState.stats.currentStake = botState.config.stake;
-                    botState.stats.martingaleCount = 0;
+                    botState.stats.galeCount = 0;
                     
                     document.getElementById('predictionDigit').innerHTML = '-';
-                    document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
                     document.getElementById('targetInfo').style.display = 'none';
                     
                     updateStats();
                     
-                    // Verificar stop win
-                    if(botState.stats.profit >= botState.config.stopWin) {
-                        addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
-                        stopBot();
-                        return;
-                    }
-                    
-                    // PASSO 7: Aguardar 5 segundos para começar de novo
+                    // PASSO 7: Aguardar 5 segundos
                     addLog('⏱️ Aguardando 5 segundos...', 'info');
                     setTimeout(() => {
-                        botState.waitingForCompletion = false;
-                        addLog('✅ Pronto para nova análise', 'success');
+                        botState.waitingCompletion = false;
                     }, 5000);
                     
                 } else {
-                    // PERDEU - Aplicar martingale
+                    // PERDEU - aplicar martingale
                     let loss = -botState.stats.currentStake;
                     botState.stats.profit += loss;
-                    botState.stats.losses++;
-                    botState.stats.martingaleCount++;
                     
-                    // Verificar stop loss ANTES de aplicar martingale
+                    addLog(`❌ PERDEU! Dígito ${lastDigit} não saiu`, 'error');
+                    
+                    // Verificar stop loss
                     if(botState.stats.profit <= -botState.config.stopLoss) {
                         addLog('🛑 STOP LOSS ATINGIDO!', 'error');
                         stopBot();
                         return;
                     }
                     
-                    // Aplicar martingale para próxima tentativa
-                    botState.stats.currentStake *= botState.config.martingale;
+                    // Aplicar gale
+                    botState.stats.currentStake *= botState.config.gale;
                     botState.inPosition = false; // Libera para nova compra
+                    botState.entryTriggered = false;
                     
-                    addLog(`❌ PERDA ${botState.stats.martingaleCount}: Dígito ${lastDigit} não saiu`, 'error');
-                    addLog(`📈 Martingale ${botState.stats.martingaleCount}: Nova stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
-                    
+                    addLog(`📈 GALE ${botState.stats.galeCount + 1}: Nova stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
                     updateStats();
-                    
-                    // Aguardar próximo tick para comprar novamente
-                    setTimeout(() => {
-                        if(botState.running && botState.targetDigit !== null) {
-                            botState.entryTriggered = false; // Permite nova entrada
-                            addLog(`🔄 Tentando novamente com stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
-                        }
-                    }, 100);
                 }
             }
         }
         
         function startBot() {
             if(!botState.connected) {
-                alert('Conecte-se à Deriv primeiro!');
+                alert('Conecte-se primeiro!');
                 return;
             }
             
             botState.running = true;
             botState.config = {
                 stake: parseFloat(document.getElementById('stake').value),
-                martingale: parseFloat(document.getElementById('martingale').value),
-                stopLoss: parseFloat(document.getElementById('stopLoss').value),
-                stopWin: parseFloat(document.getElementById('stopWin').value)
+                gale: parseFloat(document.getElementById('gale').value),
+                stopLoss: parseFloat(document.getElementById('stopLoss').value)
             };
             
             botState.stats.currentStake = botState.config.stake;
             updateStats();
             
-            addLog('🚀 Iniciando robô... Aguardando 20 segundos', 'warning');
+            addLog('🚀 Iniciando... 20s', 'warning');
             
-            let startTime = 20;
+            let timeLeft = 20;
             countdownInterval = setInterval(() => {
-                document.getElementById('startCounter').innerHTML = startTime + 's';
-                startTime--;
-                if(startTime < 0) {
+                document.getElementById('startCounter').innerHTML = timeLeft + 's';
+                timeLeft--;
+                if(timeLeft < 0) {
                     clearInterval(countdownInterval);
                     document.getElementById('startCounter').innerHTML = 'Ativo';
-                    addLog('✅ Robô ativo - Analisando mercado...', 'success');
                 }
             }, 1000);
         }
         
         function stopBot() {
             botState.running = false;
-            if(countdownInterval) clearInterval(countdownInterval);
-            
+            clearInterval(countdownInterval);
             document.getElementById('startCounter').innerHTML = '20s';
-            document.getElementById('targetInfo').style.display = 'none';
-            document.getElementById('predictionDigit').innerHTML = '-';
-            document.getElementById('predictionStatus').innerHTML = 'Parado';
-            
-            if(derivWS) derivWS.close();
-            
-            addLog('⏹️ Robô parado', 'error');
+            addLog('⏹️ Parado', 'error');
         }
     </script>
 </body>
@@ -1085,7 +871,6 @@ async def health():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
            
            
