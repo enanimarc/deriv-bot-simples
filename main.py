@@ -458,7 +458,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Aguarda 30s → Encontra o dígito com 0% → Aguarda 8% → Compra → Martingale até acertar</p>
+            <p>Gráfico em tempo real | Encontra 0% → Aguarda 8% → Compra → Martingale</p>
         </div>
         
         <div class="market-bar">
@@ -525,13 +525,13 @@ HTML = """
                 <div class="prediction-box">
                     <div class="prediction-label">DÍGITO DA PREVISÃO</div>
                     <div class="prediction-digit" id="predictionDigit">-</div>
-                    <div id="predictionStatus" style="color: #ffaa00; font-size: 12px;">Aguardando 30s...</div>
+                    <div id="predictionStatus" style="color: #ffaa00; font-size: 12px;">Aguardando...</div>
                 </div>
                 
                 <div class="counters">
                     <div class="counter">
                         <div class="counter-label">INÍCIO</div>
-                        <div class="counter-value" id="startCounter">30s</div>
+                        <div class="counter-value" id="startCounter">20s</div>
                     </div>
                     <div class="counter">
                         <div class="counter-label">GALE</div>
@@ -663,7 +663,7 @@ HTML = """
         }
         
         // ============================================
-        // ATUALIZAÇÃO DO GRÁFICO
+        // ATUALIZAÇÃO DO GRÁFICO - FUNCIONA SEMPRE
         // ============================================
         function updateBars() {
             for(let i = 0; i <= 9; i++) {
@@ -781,10 +781,10 @@ HTML = """
                             botState.tickHistory.shift();
                         }
                         
-                        // Calcular frequências
+                        // Calcular frequências e ATUALIZAR BARRAS IMEDIATAMENTE
                         calculateFrequencies();
                         
-                        // Só executar estratégia após 30s
+                        // Só executar estratégia após 20s
                         if(botState.running && botState.analysisStarted) {
                             executeStrategy(digit);
                         }
@@ -864,7 +864,7 @@ HTML = """
         }
         
         // ============================================
-        // CALCULAR FREQUÊNCIAS
+        // CALCULAR FREQUÊNCIAS E ATUALIZAR BARRAS
         // ============================================
         function calculateFrequencies() {
             if(botState.tickHistory.length === 0) return;
@@ -880,25 +880,25 @@ HTML = """
                 botState.frequencies[i] = (counts[i] / total) * 100;
             }
             
+            // ATUALIZA AS BARRAS A CADA TICK
             updateBars();
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - CORRIGIDA
-        // ENCONTRA EXATAMENTE 0%
+        // ESTRATÉGIA PRINCIPAL
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Encontrar dígito com 0% (exatamente zero)
+            // PASSO 1: Encontrar dígito com 0%
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 
-                // IMPORTANTE: Só procura quando já tem 25 ticks
-                if(botState.tickHistory.length < 25) return;
+                // Só procura quando já tem pelo menos 10 ticks para ter dados mínimos
+                if(botState.tickHistory.length < 10) return;
                 
                 // Verificar se existe algum dígito com EXATAMENTE 0%
                 let zeroDigit = null;
                 for(let i = 0; i <= 9; i++) {
-                    // Considera 0% se for menor que 0.1% (praticamente zero)
-                    if(botState.frequencies[i] < 0.1) {
+                    // Considera 0% se for menor que 0.5% (para compensar arredondamentos)
+                    if(botState.frequencies[i] < 0.5) {
                         zeroDigit = i;
                         break;
                     }
@@ -913,9 +913,9 @@ HTML = """
                     document.getElementById('predictionDigit').innerHTML = zeroDigit;
                     document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${botState.frequencies[zeroDigit].toFixed(1)}%)`;
                     document.getElementById('targetInfo').style.display = 'block';
-                    document.getElementById('targetInfo').innerHTML = `🎯 Dígito alvo: ${zeroDigit} (0%) - Aguardando 8%`;
+                    document.getElementById('targetInfo').innerHTML = `🎯 Dígito alvo: ${zeroDigit} (${botState.frequencies[zeroDigit].toFixed(1)}%) - Aguardando 8%`;
                     
-                    addLog(`🎯 Dígito alvo: ${zeroDigit} (0%)`, 'warning');
+                    addLog(`🎯 Dígito alvo: ${zeroDigit} (${botState.frequencies[zeroDigit].toFixed(1)}%)`, 'warning');
                 }
             }
             
@@ -1023,7 +1023,7 @@ HTML = """
             }
             
             botState.running = true;
-            botState.analysisStarted = false;
+            botState.analysisStarted = false; // Ainda não começou análise
             botState.config = {
                 stake: parseFloat(document.getElementById('stake').value),
                 gale: parseFloat(document.getElementById('gale').value),
@@ -1033,18 +1033,18 @@ HTML = """
             botState.stats.currentStake = botState.config.stake;
             updateStats();
             
-            addLog('🚀 Iniciando robô... Aguardando 30 segundos para gráfico estabilizar', 'warning');
+            addLog('🚀 Iniciando robô... Aguardando 20 segundos para análise', 'warning');
             
-            // Timer de 30 segundos antes de começar análise
+            // Timer de 20 segundos antes de começar análise
             if(analysisTimer) clearTimeout(analysisTimer);
             analysisTimer = setTimeout(() => {
                 botState.analysisStarted = true;
                 addLog('✅ Análise iniciada - Procurando dígito com 0%', 'success');
                 document.getElementById('predictionStatus').innerHTML = 'Analisando...';
-            }, 30000);
+            }, 20000);
             
             // Contador regressivo visual
-            let timeLeft = 30;
+            let timeLeft = 20;
             if(countdownInterval) clearInterval(countdownInterval);
             
             countdownInterval = setInterval(() => {
@@ -1075,7 +1075,7 @@ HTML = """
                 ws = null;
             }
             
-            document.getElementById('startCounter').innerHTML = '30s';
+            document.getElementById('startCounter').innerHTML = '20s';
             document.getElementById('predictionDigit').innerHTML = '-';
             document.getElementById('predictionStatus').innerHTML = 'Parado';
             document.getElementById('targetInfo').style.display = 'none';
