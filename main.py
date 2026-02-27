@@ -458,7 +458,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Conexão contínua com API da Deriv | Dados REAIS do mercado</p>
+            <p>Aguarda 30s para estabilizar → Analisa 0% → Aguarda 8% → Compra → Martingale até acertar</p>
         </div>
         
         <div class="market-bar">
@@ -482,7 +482,7 @@ HTML = """
         <div class="main-grid">
             <div class="chart-panel">
                 <div class="chart-header">
-                    <div class="chart-title">📊 Últimos 25 dígitos - Dados REAIS</div>
+                    <div class="chart-title">📊 Frequência dos Dígitos - Últimos 25 ticks</div>
                 </div>
                 
                 <div class="chart-wrapper">
@@ -525,13 +525,13 @@ HTML = """
                 <div class="prediction-box">
                     <div class="prediction-label">DÍGITO DA PREVISÃO</div>
                     <div class="prediction-digit" id="predictionDigit">-</div>
-                    <div id="predictionStatus" style="color: #ffaa00; font-size: 12px;">Aguardando</div>
+                    <div id="predictionStatus" style="color: #ffaa00; font-size: 12px;">Aguardando 30s...</div>
                 </div>
                 
                 <div class="counters">
                     <div class="counter">
                         <div class="counter-label">INÍCIO</div>
-                        <div class="counter-value" id="startCounter">20s</div>
+                        <div class="counter-value" id="startCounter">30s</div>
                     </div>
                     <div class="counter">
                         <div class="counter-label">GALE</div>
@@ -608,7 +608,7 @@ HTML = """
             inPosition: false,
             waitingCompletion: false,
             entryTriggered: false,
-            hasCollected25Ticks: false, // NOVO: só começa estratégia após 25 ticks
+            analysisStarted: false, // Controle para iniciar análise após 30s
             tickHistory: [],
             frequencies: Array(10).fill(0),
             stats: {
@@ -624,6 +624,7 @@ HTML = """
         };
         
         let countdownInterval = null;
+        let analysisTimer = null;
         let logs = [];
         
         // ============================================
@@ -774,27 +775,18 @@ HTML = """
                         
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
-                        // Adicionar ao histórico
+                        // Adicionar ao histórico (sempre manter últimos 25)
                         botState.tickHistory.push(digit);
-                        
-                        // Só manter últimos 25 ticks
                         if(botState.tickHistory.length > 25) {
                             botState.tickHistory.shift();
                         }
                         
-                        // Calcular frequências
+                        // Calcular frequências (sempre calcula para o gráfico)
                         calculateFrequencies();
                         
-                        // Só começar estratégia quando tiver 25 ticks
-                        if(botState.tickHistory.length === 25) {
-                            if(!botState.hasCollected25Ticks) {
-                                botState.hasCollected25Ticks = true;
-                                addLog('📊 25 ticks coletados - Gráfico estabilizado', 'success');
-                            }
-                            
-                            if(botState.running) {
-                                executeStrategy(digit);
-                            }
+                        // Só executar estratégia se a análise já começou (após 30s)
+                        if(botState.running && botState.analysisStarted) {
+                            executeStrategy(digit);
                         }
                     }
                     
@@ -810,7 +802,7 @@ HTML = """
                 
                 ws.onclose = (event) => {
                     botState.connected = false;
-                    botState.hasCollected25Ticks = false; // Reset ao desconectar
+                    botState.analysisStarted = false; // Reset ao desconectar
                     updateConnectionStatus('disconnected');
                     
                     if(event.code !== 1000) {
@@ -895,26 +887,36 @@ HTML = """
         // ESTRATÉGIA PRINCIPAL - CORRIGIDA
         // ============================================
         function executeStrategy(lastDigit) {
-            // Só executar estratégia se já tiver 25 ticks
-            if(botState.tickHistory.length < 25) return;
-            
-            // PASSO 1: Encontrar dígito com 0% (apenas se não estiver em posição)
+            // PASSO 1: Encontrar dígito com 0% (apenas quando não tem alvo)
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
-                let zeroDigits = [];
                 
-                // Primeiro, encontrar todos os dígitos com percentual muito baixo
+                // IMPORTANTE: Só considerar dígitos que realmente existem no histórico
+                // Ignorar quando todos estão zerados (início)
+                let hasValidData = false;
                 for(let i = 0; i <= 9; i++) {
-                    if(botState.frequencies[i] < 1.0) { // Menos de 1% é considerado 0%
-                        zeroDigits.push(i);
+                    if(botState.frequencies[i] > 0) {
+                        hasValidData = true;
+                        break;
                     }
                 }
                 
-                // Se houver múltiplos dígitos com 0%, escolher o que tem menor percentual
-                if(zeroDigits.length > 0) {
-                    // Escolher o dígito com menor percentual
-                    let chosenDigit = zeroDigits.reduce((min, d) => 
+                if(!hasValidData) return; // Ainda não tem dados válidos
+                
+                // Encontrar TODOS os dígitos com percentual próximo de 0
+                let candidates = [];
+                for(let i = 0; i <= 9; i++) {
+                    // Considera 0% se for menor que 2% (para evitar dígitos que acabaram de aparecer)
+                    if(botState.frequencies[i] < 2.0) {
+                        candidates.push(i);
+                    }
+                }
+                
+                // Se encontrou candidatos, escolher um (preferência pelo que tem MENOS ocorrências)
+                if(candidates.length > 0) {
+                    // Escolher o dígito com menor percentual entre os candidatos
+                    let chosenDigit = candidates.reduce((min, d) => 
                         botState.frequencies[d] < botState.frequencies[min] ? d : min
-                    , zeroDigits[0]);
+                    , candidates[0]);
                     
                     botState.targetDigit = chosenDigit;
                     botState.waitingCompletion = true;
@@ -1033,6 +1035,7 @@ HTML = """
             }
             
             botState.running = true;
+            botState.analysisStarted = false; // Ainda não começou análise
             botState.config = {
                 stake: parseFloat(document.getElementById('stake').value),
                 gale: parseFloat(document.getElementById('gale').value),
@@ -1042,9 +1045,18 @@ HTML = """
             botState.stats.currentStake = botState.config.stake;
             updateStats();
             
-            addLog('🚀 Iniciando robô... Aguardando 20 segundos', 'warning');
+            addLog('🚀 Iniciando robô... Aguardando 30 segundos para gráfico estabilizar', 'warning');
             
-            let timeLeft = 20;
+            // Timer de 30 segundos antes de começar análise
+            if(analysisTimer) clearTimeout(analysisTimer);
+            analysisTimer = setTimeout(() => {
+                botState.analysisStarted = true;
+                addLog('✅ Análise iniciada - Procurando dígito com 0%', 'success');
+                document.getElementById('predictionStatus').innerHTML = 'Analisando...';
+            }, 30000);
+            
+            // Contador regressivo visual
+            let timeLeft = 30;
             if(countdownInterval) clearInterval(countdownInterval);
             
             countdownInterval = setInterval(() => {
@@ -1054,24 +1066,19 @@ HTML = """
                 if(timeLeft < 0) {
                     clearInterval(countdownInterval);
                     document.getElementById('startCounter').innerHTML = 'Ativo';
-                    
-                    // Se ainda não tem 25 ticks, avisar
-                    if(botState.tickHistory.length < 25) {
-                        addLog(`⏳ Aguardando coletar 25 ticks... (${botState.tickHistory.length}/25)`, 'info');
-                    } else {
-                        addLog('✅ Robô ativo - Analisando mercado...', 'success');
-                    }
                 }
             }, 1000);
         }
         
         function stopBot() {
             botState.running = false;
+            botState.analysisStarted = false;
             botState.targetDigit = null;
             botState.inPosition = false;
             botState.waitingCompletion = false;
             
             if(countdownInterval) clearInterval(countdownInterval);
+            if(analysisTimer) clearTimeout(analysisTimer);
             if(heartbeatInterval) clearInterval(heartbeatInterval);
             if(reconnectTimer) clearTimeout(reconnectTimer);
             
@@ -1080,7 +1087,7 @@ HTML = """
                 ws = null;
             }
             
-            document.getElementById('startCounter').innerHTML = '20s';
+            document.getElementById('startCounter').innerHTML = '30s';
             document.getElementById('predictionDigit').innerHTML = '-';
             document.getElementById('predictionStatus').innerHTML = 'Parado';
             document.getElementById('targetInfo').style.display = 'none';
