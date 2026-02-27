@@ -436,7 +436,7 @@ HTML = """
             padding: 16px 24px;
             font-family: monospace;
             font-size: 12px;
-            height: 150px;
+            height: 200px;
             overflow-y: auto;
             color: #e0e0e0;
         }
@@ -452,6 +452,17 @@ HTML = """
         .badge-disconnected { background: #ff4444; }
         .badge-connecting { background: #ffaa00; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        
+        .debug-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a24;
+            border: 1px solid #2a2a35;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #8888a0;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -513,6 +524,12 @@ HTML = """
                             <div class="bars-container" id="barsContainer"></div>
                         </div>
                     </div>
+                </div>
+                
+                <div class="debug-info" id="debugInfo">
+                    <div>Ticks recebidos: <span id="tickCount">0</span></div>
+                    <div>Último dígito: <span id="lastDigit">-</span></div>
+                    <div>Histórico: <span id="tickHistory">[]</span></div>
                 </div>
             </div>
             
@@ -577,6 +594,7 @@ HTML = """
                         <button class="btn btn-test" onclick="connectDeriv()">🔌 CONECTAR</button>
                         <button class="btn btn-start" onclick="startBot()">▶️ INICIAR</button>
                         <button class="btn btn-stop" onclick="stopBot()">⏹️ PARAR</button>
+                        <button class="btn btn-test" onclick="toggleDebug()">🐛 DEBUG</button>
                     </div>
                     
                     <div id="targetInfo" class="target-info"></div>
@@ -628,6 +646,7 @@ HTML = """
         
         let countdownInterval = null;
         let analysisTimer = null;
+        let debugVisible = false;
         
         // ============================================
         // INICIALIZAÇÃO DO GRÁFICO
@@ -665,8 +684,22 @@ HTML = """
             }
         }
         
+        function toggleDebug() {
+            let debug = document.getElementById('debugInfo');
+            debugVisible = !debugVisible;
+            debug.style.display = debugVisible ? 'block' : 'none';
+        }
+        
+        function updateDebug() {
+            document.getElementById('tickCount').innerHTML = botState.tickHistory.length;
+            if(botState.tickHistory.length > 0) {
+                document.getElementById('lastDigit').innerHTML = botState.tickHistory[botState.tickHistory.length - 1];
+            }
+            document.getElementById('tickHistory').innerHTML = '[' + botState.tickHistory.join(', ') + ']';
+        }
+        
         // ============================================
-        // ATUALIZAÇÃO DO GRÁFICO - CORRIGIDO
+        // ATUALIZAÇÃO DO GRÁFICO
         // ============================================
         function updateBars() {
             for(let i = 0; i <= 9; i++) {
@@ -680,7 +713,6 @@ HTML = """
                 bar.style.height = height + '%';
                 percentEl.innerHTML = percent.toFixed(1) + '%';
                 
-                // Destacar o dígito alvo (se existir) - mas NÃO CONGELA O VALOR
                 if(i === botState.targetDigit) {
                     bar.classList.add('target');
                 } else {
@@ -711,7 +743,7 @@ HTML = """
         }
         
         // ============================================
-        // CONEXÃO DERIV COM RECONEXÃO INTELIGENTE
+        // CONEXÃO DERIV
         // ============================================
         function connectDeriv() {
             let token = document.getElementById('token').value;
@@ -787,12 +819,19 @@ HTML = """
                         
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
+                        // LOG DO TICK RECEBIDO
+                        addLog(`📊 Tick recebido: $${price.toFixed(2)} | Dígito: ${digit}`, 'info');
+                        
                         botState.tickHistory.push(digit);
                         if(botState.tickHistory.length > 25) {
                             botState.tickHistory.shift();
                         }
                         
+                        // LOG DO HISTÓRICO
+                        addLog(`📈 Histórico (${botState.tickHistory.length}/25): [${botState.tickHistory.join(', ')}]`, 'info');
+                        
                         calculateFrequencies();
+                        updateDebug();
                         
                         if(botState.running && botState.analysisStarted) {
                             executeStrategy(digit);
@@ -806,6 +845,7 @@ HTML = """
                 
                 ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
+                    addLog('❌ Erro no WebSocket', 'error');
                 };
                 
                 ws.onclose = (event) => {
@@ -887,6 +927,13 @@ HTML = """
             for(let i = 0; i <= 9; i++) {
                 botState.frequencies[i] = (counts[i] / total) * 100;
             }
+            
+            // LOG DAS FREQUÊNCIAS
+            let freqStr = '';
+            for(let i = 0; i <= 9; i++) {
+                freqStr += `${i}:${botState.frequencies[i].toFixed(1)}% `;
+            }
+            addLog(`📊 Frequências: ${freqStr}`, 'info');
             
             updateBars();
         }
