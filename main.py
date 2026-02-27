@@ -465,7 +465,7 @@ HTML = """
         }
         .freq-table {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 5px;
             margin-top: 5px;
         }
@@ -480,8 +480,8 @@ HTML = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Gráfico em tempo real | Encontra 0% → Aguarda 8% → Compra → Martingale</p>
+            <h1>🤖 Deriv Bot - Dígito Matches (1-9)</h1>
+            <p>Gráfico em tempo real | Ignora dígito 0 | Encontra 0% → Aguarda 8% → Compra → Martingale</p>
         </div>
         
         <div class="market-bar">
@@ -491,7 +491,7 @@ HTML = """
             </div>
             <div class="market-item">
                 <span class="market-label">TIPO</span>
-                <span class="market-value highlight">Dígito Matches</span>
+                <span class="market-value highlight">Dígito Matches (1-9)</span>
             </div>
             <div class="market-item">
                 <span class="market-label">STATUS</span>
@@ -505,7 +505,7 @@ HTML = """
         <div class="main-grid">
             <div class="chart-panel">
                 <div class="chart-header">
-                    <div class="chart-title">📊 Frequência dos Dígitos - Últimos 25 ticks</div>
+                    <div class="chart-title">📊 Frequência dos Dígitos 1-9 - Últimos 25 ticks</div>
                 </div>
                 
                 <div class="chart-wrapper">
@@ -542,7 +542,7 @@ HTML = """
                     <div><strong>Ticks recebidos:</strong> <span id="tickCount">0</span>/25</div>
                     <div><strong>Último dígito:</strong> <span id="lastDigit">-</span></div>
                     <div><strong>Histórico:</strong> <span id="tickHistory">[]</span></div>
-                    <div><strong>Frequências:</strong></div>
+                    <div><strong>Frequências (1-9):</strong></div>
                     <div class="freq-table" id="freqTable"></div>
                 </div>
             </div>
@@ -663,12 +663,13 @@ HTML = """
         let debugVisible = false;
         
         // ============================================
-        // INICIALIZAÇÃO DO GRÁFICO
+        // INICIALIZAÇÃO DO GRÁFICO (APENAS 1-9)
         // ============================================
         function initBars() {
             let container = document.getElementById('barsContainer');
             let html = '';
-            for(let i = 0; i <= 9; i++) {
+            // Começa do 1 até 9 (ignora o 0)
+            for(let i = 1; i <= 9; i++) {
                 html += `
                     <div class="bar-wrapper">
                         <div class="bar" id="bar-${i}" style="height: 0%">
@@ -711,19 +712,19 @@ HTML = """
             }
             document.getElementById('tickHistory').innerHTML = '[' + botState.tickHistory.join(', ') + ']';
             
-            // Atualizar tabela de frequências
+            // Atualizar tabela de frequências (apenas 1-9)
             let freqHtml = '';
-            for(let i = 0; i <= 9; i++) {
+            for(let i = 1; i <= 9; i++) {
                 freqHtml += `<div class="freq-item"><strong>${i}:</strong> ${botState.frequencies[i].toFixed(1)}%</div>`;
             }
             document.getElementById('freqTable').innerHTML = freqHtml;
         }
         
         // ============================================
-        // ATUALIZAÇÃO DO GRÁFICO
+        // ATUALIZAÇÃO DO GRÁFICO (APENAS 1-9)
         // ============================================
         function updateBars() {
-            for(let i = 0; i <= 9; i++) {
+            for(let i = 1; i <= 9; i++) {
                 let bar = document.getElementById(`bar-${i}`);
                 let percentEl = document.getElementById(`percent-${i}`);
                 let percent = botState.frequencies[i] || 0;
@@ -754,25 +755,17 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÃO PARA EXTRAIR O ÚLTIMO DÍGITO DO PREÇO - CORRIGIDA
+        // FUNÇÃO PARA EXTRAIR O ÚLTIMO DÍGITO DO PREÇO
         // ============================================
         function getLastDigit(price) {
-            // Converte para string e remove ponto decimal
             let priceStr = price.toString();
-            
-            // Remove o ponto decimal se existir
             priceStr = priceStr.replace('.', '');
-            
-            // Pega o último caractere
             let lastChar = priceStr[priceStr.length - 1];
-            
-            // Converte para número - ISSO INCLUI O ZERO!
             let digit = parseInt(lastChar, 10);
             
-            // Verificação de segurança - se for NaN, retorna 0
-            if (isNaN(digit)) {
-                console.warn('⚠️ Dígito inválido:', price, '->', lastChar);
-                return 0;
+            // Se for 0, ignora (não adiciona ao histórico)
+            if (digit === 0) {
+                return null; // Retorna null para dígitos 0
             }
             
             return digit;
@@ -855,26 +848,26 @@ HTML = """
                         
                         document.getElementById('currentPrice').innerHTML = price.toFixed(2);
                         
-                        // LOG DO DIGITO RECEBIDO - INCLUINDO ZERO
-                        addLog(`📊 Tick recebido: $${price.toFixed(2)} | Dígito: ${digit}`, 'info');
-                        
-                        // Adicionar ao histórico - SEM FILTRO
-                        botState.tickHistory.push(digit);
-                        
-                        // Manter apenas últimos 25
-                        if(botState.tickHistory.length > 25) {
-                            botState.tickHistory.shift();
-                        }
-                        
-                        // Log do histórico para debug
-                        addLog(`📈 Histórico (${botState.tickHistory.length}/25): [${botState.tickHistory.join(', ')}]`, 'info');
-                        
-                        // Calcular frequências
-                        calculateFrequencies();
-                        updateDebug();
-                        
-                        if(botState.running && botState.analysisStarted) {
-                            executeStrategy(digit);
+                        // Só processa se não for null (ou seja, se não for dígito 0)
+                        if (digit !== null) {
+                            addLog(`📊 Tick recebido: $${price.toFixed(2)} | Dígito: ${digit}`, 'info');
+                            
+                            botState.tickHistory.push(digit);
+                            
+                            if(botState.tickHistory.length > 25) {
+                                botState.tickHistory.shift();
+                            }
+                            
+                            addLog(`📈 Histórico (${botState.tickHistory.length}/25): [${botState.tickHistory.join(', ')}]`, 'info');
+                            
+                            calculateFrequencies();
+                            updateDebug();
+                            
+                            if(botState.running && botState.analysisStarted) {
+                                executeStrategy(digit);
+                            }
+                        } else {
+                            addLog(`⏭️ Dígito 0 ignorado`, 'info');
                         }
                     }
                     
@@ -956,7 +949,6 @@ HTML = """
             
             let counts = Array(10).fill(0);
             
-            // Contar TODOS os dígitos, incluindo ZERO
             for(let i = 0; i < botState.tickHistory.length; i++) {
                 let digit = botState.tickHistory[i];
                 counts[digit]++;
@@ -964,14 +956,12 @@ HTML = """
             
             let total = botState.tickHistory.length;
             
-            // Calcular percentuais para TODOS os dígitos
-            for(let i = 0; i <= 9; i++) {
+            for(let i = 1; i <= 9; i++) {
                 botState.frequencies[i] = (counts[i] / total) * 100;
             }
             
-            // Log das frequências de forma organizada
             let freqStr = '';
-            for(let i = 0; i <= 9; i++) {
+            for(let i = 1; i <= 9; i++) {
                 freqStr += `${i}:${botState.frequencies[i].toFixed(1)}% `;
             }
             addLog(`📊 Frequências: ${freqStr}`, 'info');
@@ -983,7 +973,7 @@ HTML = """
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 
                 let zeroDigit = null;
-                for(let i = 0; i <= 9; i++) {
+                for(let i = 1; i <= 9; i++) {
                     if(botState.frequencies[i] < 0.5) {
                         zeroDigit = i;
                         break;
