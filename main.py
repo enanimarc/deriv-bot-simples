@@ -529,7 +529,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Gráfico em tempo real | Martingale 1.15x tick a tick | Saldo automático</p>
+            <p>Gráfico em tempo real | Martingale 1.15x tick a tick | Saldo em tempo real</p>
         </div>
         
         <div class="market-bar">
@@ -1050,6 +1050,9 @@ HTML = """
                             subscribe: 1,
                             contract_id: data.buy.contract_id
                         }));
+                        
+                        // Atualizar saldo após compra
+                        setTimeout(requestBalance, 100);
                     }
                     
                     // Resultado do contrato
@@ -1088,7 +1091,10 @@ HTML = """
                             
                             addLog('⏱️ Aguardando 5 segundos...', 'info');
                             botState.waitingCompletion = true;
-                            setTimeout(() => { botState.waitingCompletion = false; }, 5000);
+                            setTimeout(() => { 
+                                botState.waitingCompletion = false; 
+                                addLog('✅ Pronto para nova análise', 'success');
+                            }, 5000);
                             
                         } else {
                             addLog(`❌ PERDEU! Prejuízo: $${Math.abs(profit).toFixed(2)}`, 'error');
@@ -1103,7 +1109,7 @@ HTML = """
                             botState.stats.currentStake *= botState.config.gale;
                             botState.stats.galeCount++;
                             
-                            addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
+                            addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
                             
                             // Preparar para nova compra no próximo tick
                             botState.inPosition = false;
@@ -1194,27 +1200,31 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - SIMPLES E FUNCIONAL
+        // ESTRATÉGIA PRINCIPAL - MARTINGALE CONTÍNUO
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Se temos um dígito pendente do martingale, comprar neste tick
-            if(botState.currentTradeDigit !== null && !botState.inPosition && !botState.entryTriggered && !botState.waitingCompletion) {
+            // PASSO 1: PRIORIDADE MÁXIMA - Se temos um dígito pendente do martingale, comprar IMEDIATAMENTE
+            if(botState.currentTradeDigit !== null && !botState.inPosition && !botState.waitingCompletion) {
                 
-                botState.targetDigit = botState.currentTradeDigit;
-                botState.entryTriggered = true;
-                
-                document.getElementById('predictionDigit').innerHTML = botState.currentTradeDigit;
-                document.getElementById('predictionStatus').innerHTML = `Comprando (GALE ${botState.stats.galeCount})...`;
-                document.getElementById('targetInfo').style.display = 'block';
-                document.getElementById('targetInfo').innerHTML = `📊 MARTINGALE: Tentativa ${botState.stats.galeCount}`;
-                
-                addLog(`📊 Comprando (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'warning');
-                
-                buyContract(botState.currentTradeDigit, botState.stats.currentStake);
-                return;
+                // Se já não estamos no processo de compra
+                if (!botState.entryTriggered) {
+                    botState.entryTriggered = true;
+                    botState.targetDigit = botState.currentTradeDigit;
+                    
+                    document.getElementById('predictionDigit').innerHTML = botState.currentTradeDigit;
+                    document.getElementById('predictionStatus').innerHTML = `📊 MARTINGALE ${botState.stats.galeCount}: Comprando...`;
+                    document.getElementById('targetInfo').style.display = 'block';
+                    document.getElementById('targetInfo').innerHTML = `📊 Tentativa ${botState.stats.galeCount} no dígito ${botState.currentTradeDigit}`;
+                    
+                    addLog(`📊 MARTINGALE ${botState.stats.galeCount}: Comprando $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'warning');
+                    
+                    // Comprar agora mesmo
+                    buyContract(botState.currentTradeDigit, botState.stats.currentStake);
+                }
+                return; // Importante: retornar para não executar outros passos
             }
             
-            // PASSO 2: Encontrar dígito com 0% (primeira entrada)
+            // PASSO 2: Encontrar dígito com 0% (apenas se não estiver em martingale)
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion && botState.currentTradeDigit === null) {
                 
                 let zeroDigit = null;
@@ -1239,7 +1249,7 @@ HTML = """
                 }
             }
             
-            // PASSO 3: Aguardar 8% (primeira entrada)
+            // PASSO 3: Aguardar 8% (apenas primeira entrada, não em martingale)
             if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered && botState.currentTradeDigit === null) {
                 let percent = botState.frequencies[botState.targetDigit];
                 document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${percent.toFixed(1)}%)`;
