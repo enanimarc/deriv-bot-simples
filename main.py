@@ -1045,7 +1045,7 @@ HTML = """
                 
             } else {
                 // ============================================
-                // PERDEU - MARTINGALE RÁPIDO
+                // PERDEU - MARTINGALE RÁPIDO (QUE FUNCIONAVA)
                 // ============================================
                 addLog(`❌ PERDEU! Prejuízo: $${Math.abs(profit).toFixed(2)}`, 'error');
                 
@@ -1065,9 +1065,19 @@ HTML = """
                 botState.inPosition = false;
                 botState.entryTriggered = false;
                 
-                // COMPRAR NOVAMENTE NO PRÓXIMO TICK
-                // Não usar setTimeout, deixar o próximo tick natural executar a estratégia
-                // O currentTradeDigit já está mantido
+                // JÁ COMPRAR NOVAMENTE NO PRÓXIMO TICK (com setTimeout de 100ms)
+                setTimeout(() => {
+                    if(!botState.running || botState.inPosition) return;
+                    
+                    botState.inPosition = true;
+                    botState.purchasePrice = botState.stats.currentStake;
+                    
+                    addLog(`✅ NOVA COMPRA (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'success');
+                    
+                    // Solicitar proposta à API
+                    requestProposal(botState.currentTradeDigit, botState.stats.currentStake);
+                    
+                }, 100); // Delay de 100ms - ESSENCIAL PARA FUNCIONAR
                 
                 updateStats();
             }
@@ -1313,27 +1323,10 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - MARTINGALE RÁPIDO
+        // ESTRATÉGIA PRINCIPAL
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Se temos um dígito pendente do martingale, comprar neste tick
-            if(botState.currentTradeDigit !== null && !botState.inPosition && !botState.entryTriggered && !botState.waitingCompletion) {
-                
-                botState.targetDigit = botState.currentTradeDigit;
-                botState.entryTriggered = true;
-                
-                document.getElementById('predictionDigit').innerHTML = botState.currentTradeDigit;
-                document.getElementById('predictionStatus').innerHTML = `📊 Comprando (GALE ${botState.stats.galeCount}) no dígito ${botState.currentTradeDigit} com stake $${botState.stats.currentStake.toFixed(2)}`;
-                document.getElementById('targetInfo').style.display = 'block';
-                document.getElementById('targetInfo').innerHTML = `📊 MARTINGALE: Tentativa ${botState.stats.galeCount} no dígito ${botState.currentTradeDigit}`;
-                
-                addLog(`📊 Comprando (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'warning');
-                
-                requestProposal(botState.currentTradeDigit, botState.stats.currentStake);
-                return;
-            }
-            
-            // PASSO 2: Encontrar dígito com 0% (apenas primeira entrada)
+            // PASSO 1: Encontrar dígito com 0% (apenas primeira entrada)
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion && botState.currentTradeDigit === null) {
                 
                 let zeroDigit = null;
@@ -1358,7 +1351,7 @@ HTML = """
                 }
             }
             
-            // PASSO 3: Aguardar atingir 8% (apenas primeira entrada)
+            // PASSO 2: Aguardar atingir 8% (apenas primeira entrada)
             if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered && botState.currentTradeDigit === null) {
                 let currentPercent = botState.frequencies[botState.targetDigit];
                 document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${currentPercent.toFixed(1)}%)`;
