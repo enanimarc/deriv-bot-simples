@@ -481,7 +481,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Integração com API real | Martingale imediato tick a tick</p>
+            <p>Integração com API real | Martingale Opção B - Nova compra no próximo tick</p>
         </div>
         
         <div class="market-bar">
@@ -650,7 +650,7 @@ HTML = """
             inPosition: false,
             waitingCompletion: false,
             entryTriggered: false,
-            isMartingaleMode: false,
+            martingaleMode: false,
             martingaleTargetDigit: null,
             analysisStarted: false,
             tickHistory: [],
@@ -1066,11 +1066,11 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - MARTINGALE CORRIGIDO
+        // ESTRATÉGIA PRINCIPAL - MARTINGALE OPCÃO B
         // ============================================
         function executeStrategy(lastDigit) {
             // PASSO 1: Encontrar dígito com 0%
-            if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion && !botState.isMartingaleMode) {
+            if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion && !botState.martingaleMode) {
                 
                 let zeroDigit = null;
                 for(let i = 1; i <= 9; i++) {
@@ -1095,7 +1095,7 @@ HTML = """
             }
             
             // PASSO 2: Aguardar atingir 8% (APENAS NA PRIMEIRA ENTRADA)
-            if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered && !botState.isMartingaleMode) {
+            if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered && !botState.martingaleMode) {
                 let currentPercent = botState.frequencies[botState.targetDigit];
                 document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${currentPercent.toFixed(1)}%)`;
                 document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit}: ${currentPercent.toFixed(1)}% - Aguardando 8%`;
@@ -1112,23 +1112,14 @@ HTML = """
                 }
             }
             
-            // PASSO 3: Modo martingale - comprar IMEDIATAMENTE (sem aguardar 8%)
-            if(botState.isMartingaleMode && !botState.inPosition && botState.martingaleTargetDigit !== null && !botState.entryTriggered) {
-                
-                addLog(`📊 MODO MARTINGALE: Comprando imediatamente no dígito ${botState.martingaleTargetDigit} com stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
-                requestProposal(botState.martingaleTargetDigit, botState.stats.currentStake);
-                botState.entryTriggered = true;
-                botState.isMartingaleMode = false;
-            }
-            
-            // PASSO 4: Após receber proposta, comprar
+            // PASSO 3: Após receber proposta, comprar
             if(botState.entryTriggered && !botState.inPosition && pendingProposal) {
                 executeBuy();
                 botState.currentTradeDigit = botState.targetDigit || botState.martingaleTargetDigit;
                 botState.entryTriggered = false;
             }
             
-            // PASSO 5: Monitorar resultado
+            // PASSO 4: Monitorar resultado
             if(botState.inPosition && botState.currentTradeDigit !== null && botState.currentContractId) {
                 
                 if(lastDigit === botState.currentTradeDigit) {
@@ -1142,11 +1133,12 @@ HTML = """
                     
                     addLog(`💰 VENDA! Dígito ${lastDigit} saiu! | Stake: $${botState.purchasePrice.toFixed(2)} | Payout: $${payout.toFixed(2)} | Lucro: $${profit.toFixed(2)}`, 'success');
                     
+                    // Reset completo após vitória
                     botState.inPosition = false;
                     botState.targetDigit = null;
                     botState.currentTradeDigit = null;
                     botState.entryTriggered = false;
-                    botState.isMartingaleMode = false;
+                    botState.martingaleMode = false;
                     botState.martingaleTargetDigit = null;
                     botState.currentContractId = null;
                     botState.stats.currentStake = botState.config.stake;
@@ -1159,12 +1151,14 @@ HTML = """
                     
                     updateStats();
                     
+                    // Verificar STOP WIN
                     if(botState.stats.profit >= botState.config.stopWin) {
                         addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
                         stopBot();
                         return;
                     }
                     
+                    // PASSO 5: Aguardar 5 segundos
                     addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
                     botState.waitingCompletion = true;
                     
@@ -1174,33 +1168,51 @@ HTML = """
                     }, 5000);
                     
                 } else {
-                    // PERDEU!
+                    // PERDEU! - OPÇÃO B: Fechar posição e abrir NOVA no próximo tick
+                    
+                    // Registrar prejuízo da posição que foi fechada
                     let loss = -botState.purchasePrice;
                     botState.stats.profit += loss;
                     botState.stats.trades++;
                     
                     addLog(`❌ PERDEU! Dígito ${lastDigit} não saiu (alvo era ${botState.currentTradeDigit}) - Prejuízo: $${Math.abs(loss).toFixed(2)}`, 'error');
                     
+                    // Verificar STOP LOSS
                     if(botState.stats.profit <= -botState.config.stopLoss) {
                         addLog('🛑 STOP LOSS ATINGIDO!', 'error');
                         stopBot();
                         return;
                     }
                     
+                    // Calcular NOVA stake com martingale
                     botState.stats.currentStake *= botState.config.gale;
                     botState.stats.galeCount++;
                     
                     addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
                     
-                    botState.isMartingaleMode = true;
-                    botState.martingaleTargetDigit = botState.currentTradeDigit;
-                    
+                    // IMPORTANTE: Fechar posição atual e preparar para NOVA compra
                     botState.inPosition = false;
                     botState.entryTriggered = false;
                     botState.currentContractId = null;
                     
+                    // Ativar modo martingale para a próxima compra
+                    botState.martingaleMode = true;
+                    botState.martingaleTargetDigit = botState.currentTradeDigit;
+                    
                     updateStats();
                 }
+            }
+            
+            // PASSO 5: Se está em modo martingale, comprar NOVAMENTE no próximo tick
+            if(botState.martingaleMode && !botState.inPosition && !botState.entryTriggered && botState.martingaleTargetDigit !== null) {
+                
+                addLog(`🔄 MARTINGALE: Comprando novamente no dígito ${botState.martingaleTargetDigit} com stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
+                
+                // Solicitar nova proposta
+                requestProposal(botState.martingaleTargetDigit, botState.stats.currentStake);
+                
+                // Importante: Não desativar martingaleMode ainda - só desativa quando comprar
+                botState.entryTriggered = true;
             }
         }
         
@@ -1253,7 +1265,7 @@ HTML = """
             botState.waitingCompletion = false;
             botState.currentTradeDigit = null;
             botState.currentContractId = null;
-            botState.isMartingaleMode = false;
+            botState.martingaleMode = false;
             botState.martingaleTargetDigit = null;
             pendingProposal = null;
             
