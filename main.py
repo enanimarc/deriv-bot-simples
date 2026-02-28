@@ -681,6 +681,7 @@ HTML = """
                         <button class="btn btn-start" onclick="startBot()">▶️ INICIAR</button>
                         <button class="btn btn-stop" onclick="stopBot()">⏹️ PARAR</button>
                         <button class="btn btn-test" onclick="toggleDebug()">🐛 DEBUG</button>
+                        <button class="btn btn-test" onclick="requestBalance()">💰 ATUALIZAR SALDO</button>
                     </div>
                     
                     <div id="targetInfo" class="target-info"></div>
@@ -721,6 +722,7 @@ HTML = """
             frequencies: Array(10).fill(0),
             currentTradeDigit: null,
             purchasePrice: 0,
+            lastBalance: 0,
             stats: {
                 profit: 0,
                 trades: 0,
@@ -850,6 +852,7 @@ HTML = """
             botState.account.loginid = loginid;
             botState.account.balance = balance;
             botState.account.currency = currency;
+            botState.lastBalance = balance;
             
             // Determinar tipo de conta pelo prefixo
             let accountType = '';
@@ -884,15 +887,18 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÃO PARA ATUALIZAR SALDO
+        // FUNÇÃO PARA SOLICITAR SALDO MANUALMENTE
         // ============================================
-        function updateBalance(balanceData) {
-            if (!balanceData || !balanceData.balance) return;
+        function requestBalance() {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) {
+                addLog('❌ Não conectado para solicitar saldo', 'error');
+                return;
+            }
             
-            let balance = balanceData.balance;
-            botState.account.balance = balance.balance;
-            document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
-            document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
+            ws.send(JSON.stringify({
+                balance: 1
+            }));
+            addLog('📊 Solicitando saldo atual...', 'info');
         }
         
         // ============================================
@@ -973,28 +979,53 @@ HTML = """
                         // Atualizar informações da conta
                         updateAccountInfo(data);
                         
-                        // Inscrever para ticks
-                        ws.send(JSON.stringify({
-                            ticks: SYMBOL,
-                            subscribe: 1
-                        }));
-                        addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
-                        
-                        // Inscrever para atualizações de saldo
-                        ws.send(JSON.stringify({
-                            balance: 1,
-                            subscribe: 1
-                        }));
+                        // Delay de 500ms para garantir que a autorização foi processada
+                        setTimeout(() => {
+                            // Inscrever para ticks
+                            ws.send(JSON.stringify({
+                                ticks: SYMBOL,
+                                subscribe: 1
+                            }));
+                            addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
+                            
+                            // Inscrever para atualizações de saldo
+                            ws.send(JSON.stringify({
+                                balance: 1,
+                                subscribe: 1
+                            }));
+                            addLog(`💰 Inscrito para atualizações de saldo`, 'success');
+                            
+                            // Solicitar saldo inicial
+                            ws.send(JSON.stringify({
+                                balance: 1
+                            }));
+                        }, 500);
                         
                         startHeartbeat();
                     }
                     
-                    // Atualização de saldo
-                    if(data.msg_type === 'balance' && data.balance) {
-                        updateBalance(data);
-                        addLog(`💰 Saldo atualizado: ${data.balance.currency} ${data.balance.balance.toFixed(2)}`, 'info');
+                    // Processar atualizações de saldo
+                    if(data.msg_type === 'balance') {
+                        if (data.error) {
+                            addLog(`❌ Erro ao obter saldo: ${data.error.message}`, 'error');
+                            return;
+                        }
+                        
+                        if (data.balance) {
+                            let balance = data.balance;
+                            botState.account.balance = balance.balance;
+                            document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
+                            document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
+                            
+                            // Mostrar no log quando o saldo mudar significativamente
+                            if (Math.abs(balance.balance - botState.lastBalance) > 0.01) {
+                                addLog(`💰 Saldo atualizado: ${balance.currency} ${balance.balance.toFixed(2)}`, 'info');
+                                botState.lastBalance = balance.balance;
+                            }
+                        }
                     }
                     
+                    // Processar ticks
                     if(data.msg_type === 'tick' && data.tick) {
                         let tick = data.tick;
                         let price = tick.quote;
