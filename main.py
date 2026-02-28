@@ -707,8 +707,6 @@ HTML = """
         let heartbeatInterval = null;
         let connectionAttempts = 0;
         let maxReconnectAttempts = 5;
-        let pendingProposal = null;
-        let currentProposalId = null;
         
         let botState = {
             running: false,
@@ -723,7 +721,6 @@ HTML = """
             frequencies: Array(10).fill(0),
             currentTradeDigit: null,
             purchasePrice: 0,
-            currentContractId: null,
             stats: {
                 profit: 0,
                 trades: 0,
@@ -840,14 +837,62 @@ HTML = """
         }
         
         // ============================================
-        // ATUALIZAÇÃO DO SALDO DA CONTA
+        // FUNÇÃO PARA ATUALIZAR INFORMAÇÕES DA CONTA
         // ============================================
-        function updateAccountBalance(balance) {
-            if (balance) {
-                botState.account.balance = balance.balance;
-                document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
-                document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
+        function updateAccountInfo(authorizeData) {
+            if (!authorizeData || !authorizeData.authorize) return;
+            
+            let auth = authorizeData.authorize;
+            let loginid = auth.loginid;
+            let balance = auth.balance;
+            let currency = auth.currency;
+            
+            botState.account.loginid = loginid;
+            botState.account.balance = balance;
+            botState.account.currency = currency;
+            
+            // Determinar tipo de conta pelo prefixo
+            let accountType = '';
+            let accountTypeIcon = '';
+            let accountTypeClass = '';
+            
+            if (loginid.startsWith('VRTC') || loginid.startsWith('VRW')) {
+                accountType = 'CONTA DEMO';
+                accountTypeIcon = '🧪';
+                accountTypeClass = 'badge-demo';
+                botState.account.type = 'DEMO';
+            } else if (loginid.startsWith('CR')) {
+                accountType = 'CONTA REAL';
+                accountTypeIcon = '💰';
+                accountTypeClass = 'badge-real';
+                botState.account.type = 'REAL';
+            } else {
+                accountType = 'CONTA';
+                accountTypeIcon = '💳';
             }
+            
+            // Atualizar interface
+            document.getElementById('accountInfo').style.display = 'flex';
+            document.getElementById('accountTypeIcon').innerHTML = accountTypeIcon;
+            document.getElementById('accountType').innerHTML = accountType;
+            document.getElementById('accountType').className = accountTypeClass;
+            document.getElementById('accountId').innerHTML = loginid;
+            document.getElementById('accountBalance').innerHTML = balance.toFixed(2);
+            document.getElementById('accountCurrency').innerHTML = currency;
+            
+            addLog(`📊 Conta: ${loginid} | Tipo: ${accountType} | Saldo: ${currency} ${balance.toFixed(2)}`, 'success');
+        }
+        
+        // ============================================
+        // FUNÇÃO PARA ATUALIZAR SALDO
+        // ============================================
+        function updateBalance(balanceData) {
+            if (!balanceData || !balanceData.balance) return;
+            
+            let balance = balanceData.balance;
+            botState.account.balance = balance.balance;
+            document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
+            document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
         }
         
         // ============================================
@@ -863,49 +908,6 @@ HTML = """
                 return null;
             }
             return digit;
-        }
-        
-        // ============================================
-        // FUNÇÃO PARA SOLICITAR PROPOSTA DE PREÇO
-        // ============================================
-        function requestProposal(digit, amount) {
-            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) {
-                addLog('❌ Não conectado à Deriv', 'error');
-                return;
-            }
-            
-            let proposalRequest = {
-                proposal: 1,
-                amount: amount,
-                barrier: digit.toString(),
-                basis: "stake",
-                contract_type: "DIGITMATCH",
-                currency: botState.account.currency || "USD",
-                duration: 1,
-                duration_unit: "t",
-                symbol: SYMBOL
-            };
-            
-            addLog(`📝 Solicitando proposta para dígito ${digit} com stake $${amount.toFixed(2)}`, 'info');
-            ws.send(JSON.stringify(proposalRequest));
-        }
-        
-        // ============================================
-        // FUNÇÃO PARA EXECUTAR COMPRA
-        // ============================================
-        function executeBuy(proposalId, price) {
-            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) {
-                addLog('❌ Não conectado à Deriv', 'error');
-                return;
-            }
-            
-            let buyRequest = {
-                buy: proposalId,
-                price: price
-            };
-            
-            addLog(`💵 Executando compra do contrato...`, 'warning');
-            ws.send(JSON.stringify(buyRequest));
         }
         
         // ============================================
@@ -958,7 +960,6 @@ HTML = """
                 ws.onmessage = (event) => {
                     let data = JSON.parse(event.data);
                     
-                    // Resposta de autorização
                     if(data.msg_type === 'authorize') {
                         if(data.error) {
                             updateConnectionStatus('disconnected');
@@ -969,32 +970,8 @@ HTML = """
                         botState.connected = true;
                         updateConnectionStatus('connected');
                         
-                        // Extrair informações da conta
-                        let auth = data.authorize;
-                        botState.account.loginid = auth.loginid;
-                        botState.account.balance = auth.balance;
-                        botState.account.currency = auth.currency;
-                        
-                        // Identificar tipo de conta
-                        if (auth.loginid.startsWith('VRTC') || auth.loginid.startsWith('VRW')) {
-                            botState.account.type = 'DEMO';
-                            document.getElementById('accountType').innerHTML = 'CONTA DEMO';
-                            document.getElementById('accountType').className = 'badge-demo';
-                            document.getElementById('accountTypeIcon').innerHTML = '🧪';
-                        } else if (auth.loginid.startsWith('CR')) {
-                            botState.account.type = 'REAL';
-                            document.getElementById('accountType').innerHTML = 'CONTA REAL';
-                            document.getElementById('accountType').className = 'badge-real';
-                            document.getElementById('accountTypeIcon').innerHTML = '💰';
-                        }
-                        
-                        // Atualizar interface
-                        document.getElementById('accountInfo').style.display = 'flex';
-                        document.getElementById('accountId').innerHTML = auth.loginid;
-                        document.getElementById('accountBalance').innerHTML = auth.balance.toFixed(2);
-                        document.getElementById('accountCurrency').innerHTML = auth.currency;
-                        
-                        addLog(`✅ Autorizado com sucesso! Conta: ${auth.loginid} | Saldo: ${auth.currency} ${auth.balance.toFixed(2)}`, 'success');
+                        // Atualizar informações da conta
+                        updateAccountInfo(data);
                         
                         // Inscrever para ticks
                         ws.send(JSON.stringify({
@@ -1014,12 +991,10 @@ HTML = """
                     
                     // Atualização de saldo
                     if(data.msg_type === 'balance' && data.balance) {
-                        botState.account.balance = data.balance.balance;
-                        document.getElementById('accountBalance').innerHTML = data.balance.balance.toFixed(2);
+                        updateBalance(data);
                         addLog(`💰 Saldo atualizado: ${data.balance.currency} ${data.balance.balance.toFixed(2)}`, 'info');
                     }
                     
-                    // Tick recebido
                     if(data.msg_type === 'tick' && data.tick) {
                         let tick = data.tick;
                         let price = tick.quote;
@@ -1040,90 +1015,6 @@ HTML = """
                             if(botState.running && botState.analysisStarted) {
                                 executeStrategy(digit);
                             }
-                        }
-                    }
-                    
-                    // Resposta de proposta
-                    if(data.msg_type === 'proposal' && data.proposal) {
-                        if (data.error) {
-                            addLog(`❌ Erro na proposta: ${data.error.message}`, 'error');
-                            return;
-                        }
-                        
-                        let proposal = data.proposal;
-                        let payout = parseFloat(proposal.payout);
-                        let stake = parseFloat(proposal.ask_price);
-                        let profit = payout - stake;
-                        let return_pct = ((profit / stake) * 100).toFixed(1);
-                        
-                        addLog(`📊 Proposta recebida: Stake: $${stake.toFixed(2)} | Payout: $${payout.toFixed(2)} | Lucro: $${profit.toFixed(2)} | Retorno: ${return_pct}%`, 'success');
-                        
-                        // Armazenar ID da proposta para compra
-                        currentProposalId = proposal.id;
-                        pendingProposal = {
-                            id: proposal.id,
-                            stake: stake,
-                            payout: payout,
-                            digit: parseInt(proposal.barrier)
-                        };
-                        
-                        document.getElementById('contractInfo').innerHTML = `
-                            Stake: $${stake.toFixed(2)} | Payout: $${payout.toFixed(2)} | Retorno: ${return_pct}%
-                        `;
-                        
-                        // Executar compra automaticamente
-                        if (botState.entryTriggered) {
-                            executeBuy(proposal.id, stake);
-                        }
-                    }
-                    
-                    // Resposta de compra
-                    if(data.msg_type === 'buy' && data.buy) {
-                        if (data.error) {
-                            addLog(`❌ Erro na compra: ${data.error.message}`, 'error');
-                            pendingProposal = null;
-                            currentProposalId = null;
-                            botState.entryTriggered = false;
-                            return;
-                        }
-                        
-                        let buy = data.buy;
-                        botState.currentContractId = buy.contract_id;
-                        botState.inPosition = true;
-                        botState.purchasePrice = buy.buy_price;
-                        
-                        let payout = buy.payout || 0;
-                        let profit = payout - botState.purchasePrice;
-                        
-                        addLog(`✅ CONTRATO COMPRADO! ID: ${buy.contract_id} | Preço: $${botState.purchasePrice.toFixed(2)} | Payout: $${payout.toFixed(2)}`, 'success');
-                        
-                        document.getElementById('contractInfo').innerHTML = `
-                            ✅ Contrato ativo | ID: ${buy.contract_id} | Stake: $${botState.purchasePrice.toFixed(2)}
-                        `;
-                        
-                        pendingProposal = null;
-                        currentProposalId = null;
-                        botState.entryTriggered = false;
-                    }
-                    
-                    // Proposta aberta (acompanhamento do contrato)
-                    if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
-                        let contract = data.proposal_open_contract;
-                        
-                        // Verificar se o contrato foi vendido (ganhou/perdeu)
-                        if (contract.is_sold === 1) {
-                            let profit = parseFloat(contract.profit) || 0;
-                            let soldPrice = parseFloat(contract.sold_for) || 0;
-                            
-                            addLog(`📊 Contrato finalizado | Lucro/Perda: ${profit > 0 ? '+' : ''}${profit.toFixed(2)}`, profit > 0 ? 'success' : 'error');
-                            
-                            // Atualizar estatísticas locais (opcional, pois o saldo real já atualiza via balance)
-                            if (profit > 0) {
-                                botState.stats.wins++;
-                            }
-                            
-                            botState.currentContractId = null;
-                            botState.inPosition = false;
                         }
                     }
                     
@@ -1223,7 +1114,7 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - COM TRANSAÇÕES REAIS
+        // ESTRATÉGIA PRINCIPAL - OPÇÃO B MARTINGALE RÁPIDO
         // ============================================
         function executeStrategy(lastDigit) {
             // PASSO 1: Encontrar dígito com 0%
@@ -1260,18 +1151,108 @@ HTML = """
                 if(currentPercent >= 8) {
                     botState.entryTriggered = true;
                     
-                    document.getElementById('predictionStatus').innerHTML = `📊 Atingiu 8%! Solicitando proposta...`;
-                    document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Solicitando proposta...`;
+                    document.getElementById('predictionStatus').innerHTML = `📊 Atingiu 8%! Comprando...`;
+                    document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Comprando...`;
                     
-                    addLog(`📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Solicitando proposta...`, 'warning');
+                    addLog(`📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Comprando...`, 'warning');
                     
-                    // Solicitar proposta REAL à API
-                    requestProposal(botState.targetDigit, botState.stats.currentStake);
+                    // PASSO 3: Comprar no próximo tick
+                    setTimeout(() => {
+                        if(!botState.running) return;
+                        
+                        botState.inPosition = true;
+                        botState.currentTradeDigit = botState.targetDigit;
+                        botState.purchasePrice = botState.stats.currentStake;
+                        
+                        addLog(`✅ COMPRA: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
+                        
+                    }, 100);
                 }
             }
             
-            // PASSO 3: Monitorar resultado (via API, não simulado)
-            // O resultado será tratado pelas mensagens proposal_open_contract e balance
+            // PASSO 4: Monitorar resultado
+            if(botState.inPosition && botState.currentTradeDigit !== null) {
+                
+                if(lastDigit === botState.currentTradeDigit) {
+                    // GANHOU!
+                    let profit = botState.purchasePrice * 7.343; // Lucro de 734.3%
+                    
+                    botState.stats.profit += profit;
+                    botState.stats.trades++;
+                    botState.stats.wins++;
+                    
+                    addLog(`💰 VENDA! Dígito ${lastDigit} saiu! | Stake: $${botState.purchasePrice.toFixed(2)} | Lucro: $${profit.toFixed(2)}`, 'success');
+                    
+                    // Reset após vitória
+                    botState.inPosition = false;
+                    botState.targetDigit = null;
+                    botState.currentTradeDigit = null;
+                    botState.entryTriggered = false;
+                    botState.stats.currentStake = botState.config.stake;
+                    botState.stats.galeCount = 0;
+                    
+                    document.getElementById('predictionDigit').innerHTML = '-';
+                    document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
+                    document.getElementById('targetInfo').style.display = 'none';
+                    
+                    updateStats();
+                    
+                    // Verificar STOP WIN
+                    if(botState.stats.profit >= botState.config.stopWin) {
+                        addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
+                        stopBot();
+                        return;
+                    }
+                    
+                    // PASSO 5: Aguardar 5 segundos
+                    addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
+                    botState.waitingCompletion = true;
+                    
+                    setTimeout(() => {
+                        botState.waitingCompletion = false;
+                        addLog('✅ Pronto para nova análise', 'success');
+                    }, 5000);
+                    
+                } else {
+                    // PERDEU! - OPÇÃO B: Fechar posição e já comprar NOVAMENTE no próximo tick
+                    
+                    let loss = -botState.purchasePrice;
+                    botState.stats.profit += loss;
+                    botState.stats.trades++;
+                    
+                    addLog(`❌ PERDEU! Dígito ${lastDigit} não saiu (alvo era ${botState.currentTradeDigit}) - Prejuízo: $${Math.abs(loss).toFixed(2)}`, 'error');
+                    
+                    // Verificar STOP LOSS
+                    if(botState.stats.profit <= -botState.config.stopLoss) {
+                        addLog('🛑 STOP LOSS ATINGIDO!', 'error');
+                        stopBot();
+                        return;
+                    }
+                    
+                    // Aplicar martingale
+                    botState.stats.currentStake *= botState.config.gale;
+                    botState.stats.galeCount++;
+                    
+                    addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
+                    
+                    // IMPORTANTE: Fechar posição e preparar NOVA COMPRA para o próximo tick
+                    botState.inPosition = false;
+                    botState.entryTriggered = false;
+                    
+                    // Já comprar novamente no próximo tick
+                    setTimeout(() => {
+                        if(!botState.running || botState.inPosition) return;
+                        
+                        botState.inPosition = true;
+                        botState.purchasePrice = botState.stats.currentStake;
+                        
+                        addLog(`✅ NOVA COMPRA (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'success');
+                        
+                    }, 100);
+                    
+                    updateStats();
+                }
+            }
         }
         
         function startBot() {
@@ -1322,9 +1303,6 @@ HTML = """
             botState.inPosition = false;
             botState.waitingCompletion = false;
             botState.currentTradeDigit = null;
-            botState.currentContractId = null;
-            pendingProposal = null;
-            currentProposalId = null;
             
             if(countdownInterval) clearInterval(countdownInterval);
             if(analysisTimer) clearTimeout(analysisTimer);
