@@ -529,7 +529,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Gráfico em tempo real | Ignora dígito 0 | Martingale 1.15x tick a tick | Transações REAIS</p>
+            <p>Gráfico em tempo real | API Real | Opção B | Martingale 1.15x tick a tick</p>
         </div>
         
         <div class="market-bar">
@@ -1000,7 +1000,7 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÃO PARA PROCESSAR FIM DO CONTRATO
+        // FUNÇÃO PARA PROCESSAR FIM DO CONTRATO - OPÇÃO B
         // ============================================
         function handleContractClosed(contract) {
             let profit = parseFloat(contract.profit) || 0;
@@ -1009,6 +1009,9 @@ HTML = """
             botState.stats.profit += profit;
             
             if (profit > 0) {
+                // ============================================
+                // GANHOU - Opção B: reset completo
+                // ============================================
                 botState.stats.wins++;
                 addLog(`💰 CONTRATO FINALIZADO - GANHOU! Lucro: $${profit.toFixed(2)}`, 'success');
                 
@@ -1017,7 +1020,7 @@ HTML = """
                 botState.targetDigit = null;
                 botState.currentTradeDigit = null;
                 botState.entryTriggered = false;
-                botState.stats.currentStake = botState.config.stake;
+                botState.stats.currentStake = botState.config.stake; // Volta à stake inicial
                 botState.stats.galeCount = 0;
                 
                 document.getElementById('predictionDigit').innerHTML = '-';
@@ -1026,12 +1029,14 @@ HTML = """
                 
                 updateStats();
                 
+                // Verificar STOP WIN
                 if(botState.stats.profit >= botState.config.stopWin) {
                     addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
                     stopBot();
                     return;
                 }
                 
+                // PASSO 5: Aguardar 5 segundos
                 addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
                 botState.waitingCompletion = true;
                 
@@ -1041,22 +1046,31 @@ HTML = """
                 }, 5000);
                 
             } else {
+                // ============================================
+                // PERDEU - Opção B: Fechar posição e abrir NOVA no próximo tick
+                // ============================================
                 addLog(`❌ CONTRATO FINALIZADO - PERDEU! Prejuízo: $${Math.abs(profit).toFixed(2)}`, 'error');
                 
+                // Verificar STOP LOSS
                 if(botState.stats.profit <= -botState.config.stopLoss) {
                     addLog('🛑 STOP LOSS ATINGIDO!', 'error');
                     stopBot();
                     return;
                 }
                 
-                // APLICAR MARTINGALE IGUAL À VERSÃO ORIGINAL
+                // IMPORTANTE: Fechar posição (já foi fechada pela API)
+                botState.inPosition = false;
+                
+                // APLICAR MARTINGALE (aumentar stake)
                 botState.stats.currentStake *= botState.config.gale;
                 botState.stats.galeCount++;
                 
                 addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
                 
-                // Reset para nova compra no próximo tick
-                botState.inPosition = false;
+                // Opção B: Já abrir NOVA posição no próximo tick
+                // Não esperar a API, já disparar a próxima compra
+                
+                // Reset para nova compra
                 botState.entryTriggered = false;
                 
                 // Já solicitar nova proposta para o próximo tick (delay 100ms)
@@ -1064,10 +1078,12 @@ HTML = """
                     if(!botState.running || botState.inPosition) return;
                     
                     botState.entryTriggered = true;
-                    addLog(`🔄 NOVA TENTATIVA (GALE ${botState.stats.galeCount}) para dígito ${botState.currentTradeDigit}`, 'warning');
+                    addLog(`🔄 NOVA TENTATIVA (GALE ${botState.stats.galeCount}) para dígito ${botState.currentTradeDigit} com stake $${botState.stats.currentStake.toFixed(2)}`, 'warning');
+                    
+                    // Solicitar nova proposta à API
                     requestProposal(botState.currentTradeDigit, botState.stats.currentStake);
                     
-                }, 100);
+                }, 100); // Delay de 100ms
                 
                 updateStats();
             }
@@ -1314,7 +1330,7 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - MARTINGALE ORIGINAL
+        // ESTRATÉGIA PRINCIPAL
         // ============================================
         function executeStrategy(lastDigit) {
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
