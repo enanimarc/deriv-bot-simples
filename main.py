@@ -529,7 +529,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Gráfico em tempo real | Ignora dígito 0 | Martingale 1.15x tick a tick</p>
+            <p>Gráfico em tempo real | Ignora dígito 0 | Martingale 1.15x tick a tick | Saldo automático</p>
         </div>
         
         <div class="market-bar">
@@ -681,7 +681,6 @@ HTML = """
                         <button class="btn btn-start" onclick="startBot()">▶️ INICIAR</button>
                         <button class="btn btn-stop" onclick="stopBot()">⏹️ PARAR</button>
                         <button class="btn btn-test" onclick="toggleDebug()">🐛 DEBUG</button>
-                        <button class="btn btn-test" onclick="requestBalance()">💰 ATUALIZAR SALDO</button>
                     </div>
                     
                     <div id="targetInfo" class="target-info"></div>
@@ -887,21 +886,6 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÃO PARA SOLICITAR SALDO MANUALMENTE
-        // ============================================
-        function requestBalance() {
-            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) {
-                addLog('❌ Não conectado para solicitar saldo', 'error');
-                return;
-            }
-            
-            ws.send(JSON.stringify({
-                balance: 1
-            }));
-            addLog('📊 Solicitando saldo atual...', 'info');
-        }
-        
-        // ============================================
         // FUNÇÃO PARA EXTRAIR O ÚLTIMO DÍGITO DO PREÇO
         // ============================================
         function getLastDigit(price) {
@@ -917,7 +901,7 @@ HTML = """
         }
         
         // ============================================
-        // CONEXÃO DERIV
+        // CONEXÃO DERIV - COM SALDO AUTOMÁTICO
         // ============================================
         function connectDeriv() {
             let token = document.getElementById('token').value;
@@ -988,23 +972,19 @@ HTML = """
                             }));
                             addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
                             
-                            // Inscrever para atualizações de saldo
+                            // Inscrever para atualizações de saldo em TEMPO REAL
                             ws.send(JSON.stringify({
                                 balance: 1,
                                 subscribe: 1
                             }));
-                            addLog(`💰 Inscrito para atualizações de saldo`, 'success');
+                            addLog(`💰 Inscrito para atualizações de saldo em tempo real`, 'success');
                             
-                            // Solicitar saldo inicial
-                            ws.send(JSON.stringify({
-                                balance: 1
-                            }));
                         }, 500);
                         
                         startHeartbeat();
                     }
                     
-                    // Processar atualizações de saldo
+                    // Processar atualizações de saldo em TEMPO REAL
                     if(data.msg_type === 'balance') {
                         if (data.error) {
                             addLog(`❌ Erro ao obter saldo: ${data.error.message}`, 'error');
@@ -1017,7 +997,7 @@ HTML = """
                             document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
                             document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
                             
-                            // Mostrar no log quando o saldo mudar significativamente
+                            // Mostrar no log quando o saldo mudar
                             if (Math.abs(balance.balance - botState.lastBalance) > 0.01) {
                                 addLog(`💰 Saldo atualizado: ${balance.currency} ${balance.balance.toFixed(2)}`, 'info');
                                 botState.lastBalance = balance.balance;
@@ -1046,6 +1026,16 @@ HTML = """
                             if(botState.running && botState.analysisStarted) {
                                 executeStrategy(digit);
                             }
+                        }
+                    }
+                    
+                    // Processar contratos para garantir que o saldo será atualizado
+                    if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
+                        let contract = data.proposal_open_contract;
+                        
+                        if (contract.is_sold === 1) {
+                            let profit = parseFloat(contract.profit) || 0;
+                            addLog(`📊 Contrato finalizado | Lucro/Perda: ${profit > 0 ? '+' : ''}${profit.toFixed(2)}`, profit > 0 ? 'success' : 'error');
                         }
                     }
                     
