@@ -529,7 +529,7 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Gráfico em tempo real | Ignora dígito 0 | Martingale 1.15x tick a tick | Transações REAIS</p>
+            <p>Gráfico em tempo real | Ignora dígito 0 | Martingale 1.15x tick a tick | Saldo em tempo real</p>
         </div>
         
         <div class="market-bar">
@@ -708,7 +708,6 @@ HTML = """
         let connectionAttempts = 0;
         let maxReconnectAttempts = 5;
         let pendingProposal = null;
-        let activeContracts = {};
         
         let botState = {
             running: false,
@@ -902,7 +901,18 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÕES DE INTEGRAÇÃO REAL COM A DERIV
+        // FUNÇÃO PARA SOLICITAR SALDO (CHAMADA A CADA TICK)
+        // ============================================
+        function requestBalance() {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) return;
+            
+            ws.send(JSON.stringify({
+                balance: 1
+            }));
+        }
+        
+        // ============================================
+        // FUNÇÕES DE TRANSAÇÃO REAL - API DERIV
         // ============================================
         
         function requestProposal(digit, amount) {
@@ -986,7 +996,6 @@ HTML = """
             botState.currentContractId = buy.contract_id;
             botState.inPosition = true;
             botState.purchasePrice = buy.buy_price;
-            botState.currentTradeDigit = botState.targetDigit;
             
             let payout = buy.payout || 0;
             
@@ -1005,6 +1014,27 @@ HTML = """
                 subscribe: 1,
                 contract_id: buy.contract_id
             }));
+            
+            // Solicitar saldo imediatamente após compra
+            setTimeout(requestBalance, 100);
+        }
+        
+        function handleBalanceUpdate(data) {
+            if (data.error) {
+                addLog(`❌ Erro ao obter saldo: ${data.error.message}`, 'error');
+                return;
+            }
+            
+            let balance = data.balance;
+            botState.account.balance = balance.balance;
+            document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
+            document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
+            
+            // Log do saldo (opcional)
+            if (Math.abs(balance.balance - botState.lastBalance) > 0.01) {
+                addLog(`💰 Saldo: ${balance.currency} ${balance.balance.toFixed(2)}`, 'info');
+                botState.lastBalance = balance.balance;
+            }
         }
         
         function handleContractUpdate(data) {
@@ -1017,6 +1047,9 @@ HTML = """
             botState.stats.profit += profit;
             
             if (profit > 0) {
+                // ============================================
+                // GANHOU
+                // ============================================
                 botState.stats.wins++;
                 addLog(`💰 CONTRATO FINALIZADO - GANHOU! Lucro: $${profit.toFixed(2)}`, 'success');
                 
@@ -1049,6 +1082,9 @@ HTML = """
                 }, 5000);
                 
             } else {
+                // ============================================
+                // PERDEU - MARTINGALE
+                // ============================================
                 addLog(`❌ CONTRATO FINALIZADO - PERDEU! Prejuízo: $${Math.abs(profit).toFixed(2)}`, 'error');
                 
                 if(botState.stats.profit <= -botState.config.stopLoss) {
@@ -1063,6 +1099,7 @@ HTML = """
                 
                 addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
                 
+                // Reset para nova compra
                 botState.inPosition = false;
                 botState.entryTriggered = false;
                 
@@ -1071,7 +1108,7 @@ HTML = """
                     if(!botState.running || botState.inPosition) return;
                     
                     botState.entryTriggered = true;
-                    addLog(`✅ NOVA COMPRA (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'success');
+                    addLog(`🔄 NOVA COMPRA (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'warning');
                     
                     // Usar a API real para comprar
                     requestProposal(botState.currentTradeDigit, botState.stats.currentStake);
@@ -1082,23 +1119,9 @@ HTML = """
             }
             
             botState.currentContractId = null;
-        }
-        
-        function handleBalanceUpdate(data) {
-            if (data.error) {
-                addLog(`❌ Erro ao obter saldo: ${data.error.message}`, 'error');
-                return;
-            }
             
-            let balance = data.balance;
-            botState.account.balance = balance.balance;
-            document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
-            document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
-            
-            if (Math.abs(balance.balance - botState.lastBalance) > 0.01) {
-                addLog(`💰 Saldo: ${balance.currency} ${balance.balance.toFixed(2)}`, 'info');
-                botState.lastBalance = balance.balance;
-            }
+            // Solicitar saldo após finalizar contrato
+            setTimeout(requestBalance, 100);
         }
         
         // ============================================
@@ -1151,7 +1174,6 @@ HTML = """
                 ws.onmessage = (event) => {
                     let data = JSON.parse(event.data);
                     
-                    // Autorização
                     if(data.msg_type === 'authorize') {
                         if(data.error) {
                             updateConnectionStatus('disconnected');
@@ -1165,31 +1187,27 @@ HTML = """
                         updateAccountInfo(data);
                         
                         setTimeout(() => {
-                            // Inscrever para ticks
                             ws.send(JSON.stringify({
                                 ticks: SYMBOL,
                                 subscribe: 1
                             }));
                             addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
                             
-                            // Inscrever para atualizações de saldo
                             ws.send(JSON.stringify({
                                 balance: 1,
                                 subscribe: 1
                             }));
-                            addLog(`💰 Inscrito para atualizações de saldo`, 'success');
+                            addLog(`💰 Inscrito para atualizações de saldo em tempo real`, 'success');
                             
                         }, 500);
                         
                         startHeartbeat();
                     }
                     
-                    // Atualização de saldo
                     if(data.msg_type === 'balance') {
                         handleBalanceUpdate(data);
                     }
                     
-                    // Processar ticks
                     if(data.msg_type === 'tick' && data.tick) {
                         let tick = data.tick;
                         let price = tick.quote;
@@ -1207,23 +1225,23 @@ HTML = """
                             calculateFrequencies();
                             updateDebug();
                             
+                            // SOLICITAR SALDO A CADA TICK
+                            requestBalance();
+                            
                             if(botState.running && botState.analysisStarted) {
                                 executeStrategy(digit);
                             }
                         }
                     }
                     
-                    // Resposta de proposta
                     if(data.msg_type === 'proposal' && data.proposal) {
                         handleProposalResponse(data);
                     }
                     
-                    // Resposta de compra
                     if(data.msg_type === 'buy' && data.buy) {
                         handleBuyResponse(data);
                     }
                     
-                    // Atualização de contrato
                     if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
                         handleContractUpdate(data);
                     }
@@ -1323,7 +1341,7 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - INALTERADA
+        // ESTRATÉGIA PRINCIPAL - OPÇÃO B MARTINGALE RÁPIDO (INALTERADA)
         // ============================================
         function executeStrategy(lastDigit) {
             // PASSO 1: Encontrar dígito com 0%
@@ -1366,7 +1384,6 @@ HTML = """
                     
                     addLog(`📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Solicitando proposta...`, 'warning');
                     
-                    // Chamada real à API
                     requestProposal(botState.targetDigit, botState.stats.currentStake);
                 }
             }
