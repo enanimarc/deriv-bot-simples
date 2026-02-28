@@ -1,174 +1,221 @@
-import os
-import json
-import time
-import websocket
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+import uvicorn
 
-# ================= CONFIGURAÇÕES =================
+app = FastAPI()
 
-TOKEN = os.getenv("DERIV_TOKEN")  # Definir no Railway
-SYMBOL = "R_100"
-BASE_STAKE = 1
-GALE_MULTIPLIER = 2
-STOP_WIN = 20
-STOP_LOSS = 20
-CURRENCY = "USD"
+HTML = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Deriv Bot Profissional</title>
+<style>
+body { background:#0f0f14; color:white; font-family:Arial; text-align:center; }
+button { padding:10px; margin:5px; }
+input { padding:5px; margin:5px; }
+#logs { background:#000; height:200px; overflow:auto; margin-top:20px; padding:10px; font-family:monospace; }
+.green { color:#4caf50; }
+.red { color:#f44336; }
+</style>
+</head>
+<body>
 
-# =================================================
+<h2>🤖 Deriv Bot Profissional - DIGITMATCH</h2>
 
-initial_balance = 0
-current_balance = 0
-stake = BASE_STAKE
-target_digit = None
-in_position = False
-running = True
+<input type="password" id="token" placeholder="Token Deriv">
+<input type="number" id="stake" value="0.35" step="0.01">
+<input type="number" id="gale" value="1.15" step="0.01">
+<input type="number" id="stopWin" value="10">
+<input type="number" id="stopLoss" value="10">
 
+<br>
 
-def log(msg):
-    print(f"[BOT] {msg}", flush=True)
+<button onclick="connect()">🔌 Conectar</button>
+<button onclick="startBot()">▶️ Iniciar</button>
+<button onclick="stopBot()">⏹️ Parar</button>
 
+<div id="logs"></div>
 
-def buy_contract(ws):
-    global stake, target_digit
+<script>
 
-    log(f"Comprando DIGITMATCH | Dígito: {target_digit} | Stake: {stake}")
+const SYMBOL = "R_100";
+const WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089";
 
-    ws.send(json.dumps({
-        "proposal": 1,
-        "amount": stake,
-        "basis": "stake",
-        "contract_type": "DIGITMATCH",
-        "currency": CURRENCY,
-        "duration": 1,
-        "duration_unit": "t",
-        "symbol": SYMBOL,
-        "barrier": str(target_digit)
-    }))
+let ws = null;
 
+let state = {
+    running: false,
+    connected: false,
+    inPosition: false,
+    proposalId: null,
+    contractId: null,
+    initialBalance: 0,
+    currentBalance: 0,
+    targetDigit: null,
+    stake: 0.35,
+    baseStake: 0.35,
+    gale: 1.15,
+    stopWin: 10,
+    stopLoss: 10
+};
 
-def on_open(ws):
-    log("Conectado à Deriv")
+function log(msg, color="white"){
+    let div = document.getElementById("logs");
+    div.innerHTML += "<div style='color:"+color+"'>["+new Date().toLocaleTimeString()+"] "+msg+"</div>";
+    div.scrollTop = div.scrollHeight;
+}
 
-    ws.send(json.dumps({
-        "authorize": TOKEN
-    }))
+function connect(){
+    let token = document.getElementById("token").value;
+    if(!token){ alert("Insira o token"); return; }
 
-    ws.send(json.dumps({
-        "ticks": SYMBOL,
-        "subscribe": 1
-    }))
+    ws = new WebSocket(WS_URL);
 
+    ws.onopen = () => {
+        log("Conectado à Deriv", "#4caf50");
+        ws.send(JSON.stringify({ authorize: token }));
+    };
 
-def on_message(ws, message):
-    global initial_balance, current_balance
-    global stake, target_digit
-    global in_position, running
+    ws.onmessage = (event) => {
+        let data = JSON.parse(event.data);
 
-    data = json.loads(message)
+        if(data.msg_type === "authorize"){
+            state.connected = true;
+            log("Autorizado com sucesso", "#4caf50");
+            ws.send(JSON.stringify({ balance: 1 }));
+            ws.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
+        }
 
-    if "error" in data:
-        log(f"Erro: {data['error']['message']}")
-        return
+        if(data.msg_type === "balance"){
+            state.currentBalance = data.balance.balance;
 
-    msg_type = data.get("msg_type")
+            if(state.initialBalance === 0){
+                state.initialBalance = state.currentBalance;
+                log("Saldo inicial: $" + state.initialBalance.toFixed(2));
+            }
+        }
 
-    # Autorização
-    if msg_type == "authorize":
-        log("Autorizado com sucesso")
-        ws.send(json.dumps({"balance": 1}))
+        if(data.msg_type === "tick" && state.running && !state.inPosition){
+            let price = data.tick.quote.toString().replace(".", "");
+            let lastDigit = parseInt(price[price.length - 1]);
 
-    # Saldo
-    if msg_type == "balance":
-        current_balance = data["balance"]["balance"]
+            state.targetDigit = lastDigit;
+            buyContract();
+        }
 
-        if initial_balance == 0:
-            initial_balance = current_balance
-            log(f"Saldo inicial: {initial_balance}")
+        if(data.msg_type === "proposal"){
+            state.proposalId = data.proposal.id;
+            ws.send(JSON.stringify({
+                buy: state.proposalId,
+                price: state.stake
+            }));
+        }
 
-    # Recebendo tick
-    if msg_type == "tick" and running:
-        if not in_position:
-            last_digit = int(str(data["tick"]["quote"])[-1])
-            target_digit = last_digit
-            buy_contract(ws)
+        if(data.msg_type === "buy"){
+            state.contractId = data.buy.contract_id;
+            state.inPosition = true;
 
-    # Proposta recebida
-    if msg_type == "proposal":
-        ws.send(json.dumps({
-            "buy": data["proposal"]["id"],
-            "price": stake
-        }))
+            ws.send(JSON.stringify({
+                proposal_open_contract: 1,
+                contract_id: state.contractId,
+                subscribe: 1
+            }));
+        }
 
-    # Compra confirmada
-    if msg_type == "buy":
-        in_position = True
+        if(data.msg_type === "proposal_open_contract"){
+            let contract = data.proposal_open_contract;
 
-        ws.send(json.dumps({
-            "proposal_open_contract": 1,
-            "contract_id": data["buy"]["contract_id"],
-            "subscribe": 1
-        }))
+            if(contract.is_sold){
+                state.inPosition = false;
+                ws.send(JSON.stringify({ balance: 1 }));
 
-    # Resultado contrato
-    if msg_type == "proposal_open_contract":
+                setTimeout(() => {
 
-        contract = data["proposal_open_contract"]
+                    let lucroTotal = state.currentBalance - state.initialBalance;
+                    log("Lucro atual: $" + lucroTotal.toFixed(2));
 
-        if contract["is_sold"]:
+                    if(lucroTotal >= state.stopWin){
+                        log("STOP WIN ATINGIDO", "#4caf50");
+                        stopBot();
+                        return;
+                    }
 
-            in_position = False
-            ws.send(json.dumps({"balance": 1}))
-            time.sleep(1)
+                    if(lucroTotal <= -state.stopLoss){
+                        log("STOP LOSS ATINGIDO", "#f44336");
+                        stopBot();
+                        return;
+                    }
 
-            lucro_total = current_balance - initial_balance
-            log(f"Lucro total atual: {lucro_total}")
+                    if(contract.profit > 0){
+                        log("WIN", "#4caf50");
+                        state.stake = state.baseStake;
+                    } else {
+                        log("LOSS - Martingale", "#f44336");
+                        state.stake *= state.gale;
+                        buyContract();
+                    }
 
-            # STOP WIN
-            if lucro_total >= STOP_WIN:
-                log("STOP WIN ATINGIDO - BOT ENCERRADO")
-                running = False
-                ws.close()
-                return
+                }, 500);
+            }
+        }
+    };
+}
 
-            # STOP LOSS
-            if lucro_total <= -STOP_LOSS:
-                log("STOP LOSS ATINGIDO - BOT ENCERRADO")
-                running = False
-                ws.close()
-                return
+function buyContract(){
+    ws.send(JSON.stringify({
+        proposal: 1,
+        amount: state.stake,
+        basis: "stake",
+        contract_type: "DIGITMATCH",
+        currency: "USD",
+        duration: 1,
+        duration_unit: "t",
+        symbol: SYMBOL,
+        barrier: state.targetDigit.toString()
+    }));
 
-            # WIN
-            if contract["profit"] > 0:
-                log("WIN")
-                stake = BASE_STAKE
+    log("Comprando dígito " + state.targetDigit + " | Stake $" + state.stake.toFixed(2));
+}
 
-            # LOSS
-            else:
-                log("LOSS - Aplicando Martingale")
-                stake *= GALE_MULTIPLIER
-                buy_contract(ws)
+function startBot(){
+    if(!state.connected){ alert("Conecte primeiro"); return; }
 
+    state.baseStake = parseFloat(document.getElementById("stake").value);
+    state.stake = state.baseStake;
+    state.gale = parseFloat(document.getElementById("gale").value);
+    state.stopWin = parseFloat(document.getElementById("stopWin").value);
+    state.stopLoss = parseFloat(document.getElementById("stopLoss").value);
 
-def on_error(ws, error):
-    log(f"Erro conexão: {error}")
+    state.running = true;
+    log("Bot iniciado");
+}
 
+function stopBot(){
+    state.running = false;
+    state.inPosition = false;
 
-def on_close(ws, close_status_code, close_msg):
-    log("Conexão encerrada")
+    if(ws){
+        ws.close();
+        ws = null;
+    }
 
+    log("Bot parado", "#f44336");
+}
 
-# ================= EXECUÇÃO =================
+</script>
 
-if not TOKEN:
-    raise Exception("Defina DERIV_TOKEN nas variáveis do Railway")
+</body>
+</html>
+"""
 
-log("Iniciando BOT profissional 24h...")
+@app.get("/")
+async def root():
+    return HTMLResponse(content=HTML)
 
-ws = websocket.WebSocketApp(
-    "wss://ws.derivws.com/websockets/v3?app_id=1089",
-    on_open=on_open,
-    on_message=on_message,
-    on_error=on_error,
-    on_close=on_close
-)
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
-ws.run_forever()
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
