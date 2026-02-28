@@ -264,7 +264,7 @@ HTML = """
             connected: false,
             authorized: false,
             token: '',
-            accountType: 'demo',   // 'real' ou 'demo'
+            accountType: 'demo',
             currency: 'USD',
             balance: 0,
 
@@ -283,8 +283,8 @@ HTML = """
             currentContractId: null,
             currentTradeDigit: null,
             purchasePrice: 0,
-            
-            // Proposal (cotação) - NOVAS VARIÁVEIS
+
+            // ← CORRIGIDO: Novos campos para fluxo proposal → buy em 2 etapas
             pendingProposalId: null,
             pendingStake: 0,
 
@@ -468,7 +468,6 @@ HTML = """
                     botState.authorized = true;
                     botState.connected  = true;
 
-                    // Detecta tipo de conta (real vs demo)
                     let isReal = acc.account_list
                         ? acc.account_list.some(a => a.loginid === acc.loginid && a.is_virtual === 0)
                         : !acc.loginid.startsWith('VRTC');
@@ -478,7 +477,6 @@ HTML = """
                     updateBalance(acc.balance, acc.currency);
                     document.getElementById('accountLogin').innerHTML = acc.loginid;
 
-                    // Badge e aviso
                     let badge = document.getElementById('accountBadge');
                     if(isReal) {
                         badge.textContent = 'REAL 🔴';
@@ -491,11 +489,9 @@ HTML = """
 
                     addLog(`✅ Autorizado! Conta: ${acc.loginid} | Tipo: ${botState.accountType.toUpperCase()} | Saldo: ${acc.balance} ${acc.currency}`, 'success');
 
-                    // Inscreve nos ticks
                     ws.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
                     addLog(`📡 Inscrito em ticks: ${SYMBOL}`, 'info');
 
-                    // Inscreve no saldo (atualização em tempo real)
                     ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
 
                     startHeartbeat();
@@ -522,8 +518,9 @@ HTML = """
                         }
                     }
                 }
-                
-                // ── PROPOSAL — Resposta da cotação ──────────────────────────
+
+                // ── PROPOSAL — Resposta da cotação ───────────────────
+                // ← CORRIGIDO: Handler da ETAPA 1 (proposal → buy em 2 etapas)
                 if(data.msg_type === 'proposal') {
                     if(data.error) {
                         addLog('❌ Erro no proposal: ' + data.error.message, 'error');
@@ -542,7 +539,7 @@ HTML = """
                         'success'
                     );
 
-                    // Compra imediatamente com o proposal_id
+                    // ← CORRIGIDO: Executa compra imediatamente com o proposal_id
                     executeBuy(proposal.id, botState.pendingStake);
                 }
 
@@ -550,7 +547,6 @@ HTML = """
                 if(data.msg_type === 'buy') {
                     if(data.error) {
                         addLog('❌ Erro na compra: ' + data.error.message, 'error');
-                        // Libera posição para tentar novamente
                         botState.inPosition = false;
                         botState.entryTriggered = false;
                         return;
@@ -572,7 +568,6 @@ HTML = """
                 if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
                     let poc = data.proposal_open_contract;
 
-                    // Só processa quando o contrato finalizou
                     if(!poc.is_sold) return;
 
                     let profit  = parseFloat(poc.profit);
@@ -583,7 +578,6 @@ HTML = """
                     botState.stats.profit += profit;
                     if(isWin) botState.stats.wins++;
 
-                    // Atualiza saldo real
                     if(poc.balance_after) {
                         updateBalance(poc.balance_after, botState.currency);
                     }
@@ -600,16 +594,16 @@ HTML = """
                         document.getElementById('lastResult').style.color = '#4caf50';
 
                         // Reset após vitória
-                        botState.inPosition       = false;
-                        botState.currentContractId = null;
-                        botState.targetDigit       = null;
-                        botState.currentTradeDigit = null;
-                        botState.entryTriggered    = false;
-                        botState.waitingFor8pct    = false;
-                        botState.pendingProposalId = null;
-                        botState.pendingStake      = 0;
+                        botState.inPosition        = false;
+                        botState.currentContractId  = null;
+                        botState.targetDigit        = null;
+                        botState.currentTradeDigit  = null;
+                        botState.entryTriggered     = false;
+                        botState.waitingFor8pct     = false;
+                        botState.pendingProposalId  = null;   // ← CORRIGIDO: limpa proposal pendente
+                        botState.pendingStake       = 0;       // ← CORRIGIDO: limpa stake pendente
                         botState.stats.currentStake = botState.config.stake;
-                        botState.stats.galeCount   = 0;
+                        botState.stats.galeCount    = 0;
 
                         document.getElementById('predictionDigit').innerHTML = '-';
                         document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
@@ -617,13 +611,11 @@ HTML = """
 
                         updateStats();
 
-                        // Verifica Stop Win
                         if(botState.stats.profit >= botState.config.stopWin) {
                             addLog('🎉 STOP WIN ATINGIDO! Encerrando bot.', 'success');
                             stopBot(); return;
                         }
 
-                        // Pausa 5s antes da próxima análise
                         addLog('⏱️ Pausa de 5s antes da próxima análise...', 'info');
                         botState.running = false;
                         setTimeout(() => {
@@ -644,16 +636,14 @@ HTML = """
                         document.getElementById('lastResult').innerHTML = `❌ $${profit.toFixed(2)}`;
                         document.getElementById('lastResult').style.color = '#f44336';
 
-                        // Verifica Stop Loss
                         if(botState.stats.profit <= -botState.config.stopLoss) {
                             addLog('🛑 STOP LOSS ATINGIDO! Encerrando bot.', 'error');
                             stopBot(); return;
                         }
 
-                        // Aplica martingale e compra de novo
                         botState.stats.currentStake *= botState.config.gale;
                         botState.stats.galeCount++;
-                        botState.inPosition  = false;
+                        botState.inPosition     = false;
                         botState.entryTriggered = false;
 
                         updateStats();
@@ -665,7 +655,7 @@ HTML = """
                             'warning'
                         );
 
-                        // Recompra imediata no mesmo dígito (agora via proposal)
+                        // ← CORRIGIDO: Recompra via sendProposal (era placeBuyOrder)
                         setTimeout(() => {
                             if(botState.running && !botState.inPosition) {
                                 sendProposal(botState.currentTradeDigit, botState.stats.currentStake);
@@ -717,7 +707,8 @@ HTML = """
         }
 
         // ============================================================
-        // ETAPA 1 — Envia PROPOSAL (cotação) para a Deriv
+        // ← CORRIGIDO: ETAPA 1 — Envia PROPOSAL (cotação) para a Deriv
+        // Substitui completamente a antiga função placeBuyOrder()
         // ============================================================
         function sendProposal(digit, stake) {
             if(!ws || ws.readyState !== WebSocket.OPEN) {
@@ -727,9 +718,9 @@ HTML = """
 
             botState.inPosition        = true;
             botState.currentTradeDigit = digit;
-            botState.pendingStake      = stake;
+            botState.pendingStake      = stake;   // ← CORRIGIDO: salva stake para usar no executeBuy
 
-            // ✅ CORRETO: barrier como STRING, sem 'prediction'
+            // ← CORRIGIDO: usa 'barrier' como STRING (não 'prediction')
             let proposalPayload = {
                 proposal:      1,
                 amount:        parseFloat(stake.toFixed(2)),
@@ -739,7 +730,7 @@ HTML = """
                 duration:      1,
                 duration_unit: 't',
                 symbol:        SYMBOL,
-                barrier:       digit.toString()   // ← "5", não prediction: 5
+                barrier:       digit.toString()   // ← CORRIGIDO: "5" e não prediction: 5
             };
 
             ws.send(JSON.stringify(proposalPayload));
@@ -752,7 +743,8 @@ HTML = """
         }
 
         // ============================================================
-        // ETAPA 2 — Executa a COMPRA com o proposal_id recebido
+        // ← CORRIGIDO: ETAPA 2 — Executa a COMPRA com o proposal_id
+        // Chamada automaticamente após receber msg_type === 'proposal'
         // ============================================================
         function executeBuy(proposalId, stake) {
             if(!ws || ws.readyState !== WebSocket.OPEN) {
@@ -761,8 +753,9 @@ HTML = """
                 return;
             }
 
+            // ← CORRIGIDO: usa buy: proposalId (não buy: 1 com parameters inline)
             let buyPayload = {
-                buy:   proposalId,           // ← ID retornado pela Deriv
+                buy:   proposalId,
                 price: parseFloat(stake.toFixed(2))
             };
 
@@ -788,7 +781,7 @@ HTML = """
                     if(botState.frequencies[i] < 0.5) { zeroDigit = i; break; }
                 }
                 if(zeroDigit !== null) {
-                    botState.targetDigit   = zeroDigit;
+                    botState.targetDigit    = zeroDigit;
                     botState.waitingFor8pct = true;
                     botState.stats.galeCount = 0;
 
@@ -814,11 +807,11 @@ HTML = """
                     botState.waitingFor8pct = false;
 
                     addLog(
-                        `📊 Dígito ${botState.targetDigit} atingiu ${cur.toFixed(1)}%! Enviando ordem real...`,
+                        `📊 Dígito ${botState.targetDigit} atingiu ${cur.toFixed(1)}%! Enviando proposta...`,
                         'warning'
                     );
 
-                    // ─── ENVIA PROPOSAL (cotação) À DERIV ───
+                    // ← CORRIGIDO: Chama sendProposal (era placeBuyOrder)
                     sendProposal(botState.targetDigit, botState.stats.currentStake);
                 }
             }
@@ -830,7 +823,7 @@ HTML = """
         function startBot() {
             if(!botState.connected) { alert('Conecte-se à Deriv primeiro!'); return; }
 
-            botState.running        = true;
+            botState.running         = true;
             botState.analysisStarted = false;
             botState.config = {
                 stake:    parseFloat(document.getElementById('stake').value),
@@ -865,15 +858,15 @@ HTML = """
         }
 
         function stopBot() {
-            botState.running         = false;
-            botState.analysisStarted = false;
-            botState.targetDigit     = null;
-            botState.inPosition      = false;
-            botState.waitingFor8pct  = false;
+            botState.running           = false;
+            botState.analysisStarted   = false;
+            botState.targetDigit       = null;
+            botState.inPosition        = false;
+            botState.waitingFor8pct    = false;
             botState.currentTradeDigit = null;
-            botState.entryTriggered  = false;
-            botState.pendingProposalId = null;
-            botState.pendingStake      = 0;
+            botState.entryTriggered    = false;
+            botState.pendingProposalId = null;   // ← CORRIGIDO: limpa proposal pendente ao parar
+            botState.pendingStake      = 0;       // ← CORRIGIDO: limpa stake pendente ao parar
 
             if(countdownInterval) clearInterval(countdownInterval);
             if(analysisTimer)     clearTimeout(analysisTimer);
@@ -882,10 +875,10 @@ HTML = """
 
             if(ws) { try { ws.close(1000, 'Bot parado'); } catch(e) {} ws = null; }
 
-            document.getElementById('startCounter').innerHTML   = '20s';
-            document.getElementById('predictionDigit').innerHTML = '-';
+            document.getElementById('startCounter').innerHTML    = '20s';
+            document.getElementById('predictionDigit').innerHTML  = '-';
             document.getElementById('predictionStatus').innerHTML = 'Parado';
-            document.getElementById('targetInfo').style.display  = 'none';
+            document.getElementById('targetInfo').style.display   = 'none';
             document.getElementById('btnStart').disabled = false;
             document.getElementById('btnStop').disabled  = true;
 
