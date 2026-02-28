@@ -58,6 +58,7 @@ HTML = """
             border-bottom: 1px solid #2a2a35;
             display: flex;
             gap: 48px;
+            flex-wrap: wrap;
         }
         
         .market-item {
@@ -80,6 +81,53 @@ HTML = """
         
         .market-value.highlight {
             color: #ff4444;
+        }
+        
+        /* NOVO - Estilo para informações da conta */
+        .account-info {
+            background: #1a1a24;
+            padding: 12px 24px;
+            border-bottom: 1px solid #2a2a35;
+            display: flex;
+            gap: 32px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .account-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #0f0f14;
+            padding: 8px 16px;
+            border-radius: 30px;
+            border: 1px solid #2a2a35;
+        }
+        
+        .badge-demo {
+            color: #ffaa00;
+            font-weight: 600;
+        }
+        
+        .badge-real {
+            color: #4caf50;
+            font-weight: 600;
+        }
+        
+        .account-id {
+            font-family: monospace;
+            color: #8888a0;
+        }
+        
+        .balance-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #4caf50;
+        }
+        
+        .currency-code {
+            color: #8888a0;
+            margin-left: 4px;
         }
         
         .main-grid {
@@ -502,6 +550,25 @@ HTML = """
             </div>
         </div>
         
+        <!-- NOVO: Informações da conta -->
+        <div class="account-info" id="accountInfo" style="display: none;">
+            <div class="account-badge" id="accountBadge">
+                <span id="accountTypeIcon">💰</span>
+                <span id="accountType">Conta</span>
+            </div>
+            <div>
+                <span class="market-label">ID da Conta</span>
+                <div class="account-id" id="accountId">---</div>
+            </div>
+            <div>
+                <span class="market-label">Saldo</span>
+                <div>
+                    <span class="balance-value" id="accountBalance">0.00</span>
+                    <span class="currency-code" id="accountCurrency">USD</span>
+                </div>
+            </div>
+        </div>
+        
         <div class="main-grid">
             <div class="chart-panel">
                 <div class="chart-header">
@@ -639,6 +706,7 @@ HTML = """
         let heartbeatInterval = null;
         let connectionAttempts = 0;
         let maxReconnectAttempts = 5;
+        let accountInfo = null;
         
         let botState = {
             running: false,
@@ -778,6 +846,59 @@ HTML = """
         }
         
         // ============================================
+        // FUNÇÃO PARA ATUALIZAR INFORMAÇÕES DA CONTA
+        // ============================================
+        function updateAccountInfo(authorizeData) {
+            if (!authorizeData || !authorizeData.authorize) return;
+            
+            let auth = authorizeData.authorize;
+            let loginid = auth.loginid;
+            let balance = auth.balance;
+            let currency = auth.currency;
+            
+            // Determinar tipo de conta pelo prefixo do loginid
+            let accountType = '';
+            let accountTypeIcon = '';
+            let accountTypeClass = '';
+            
+            if (loginid.startsWith('VRTC') || loginid.startsWith('VRW')) {
+                accountType = 'CONTA DEMO';
+                accountTypeIcon = '🧪';
+                accountTypeClass = 'badge-demo';
+            } else if (loginid.startsWith('CR')) {
+                accountType = 'CONTA REAL';
+                accountTypeIcon = '💰';
+                accountTypeClass = 'badge-real';
+            } else {
+                accountType = 'CONTA';
+                accountTypeIcon = '💳';
+            }
+            
+            // Atualizar interface
+            document.getElementById('accountInfo').style.display = 'flex';
+            document.getElementById('accountTypeIcon').innerHTML = accountTypeIcon;
+            document.getElementById('accountType').innerHTML = accountType;
+            document.getElementById('accountType').className = accountTypeClass;
+            document.getElementById('accountId').innerHTML = loginid;
+            document.getElementById('accountBalance').innerHTML = balance.toFixed(2);
+            document.getElementById('accountCurrency').innerHTML = currency;
+            
+            addLog(`📊 Conta: ${loginid} | Tipo: ${accountType} | Saldo: ${currency} ${balance.toFixed(2)}`, 'success');
+        }
+        
+        // ============================================
+        // FUNÇÃO PARA SOLICITAR SALDO ATUALIZADO
+        // ============================================
+        function requestBalance() {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) return;
+            
+            ws.send(JSON.stringify({
+                balance: 1,
+                subscribe: 1
+            }));
+        }
+        
+        // ============================================
         // CONEXÃO DERIV
         // ============================================
         function connectDeriv() {
@@ -838,13 +959,27 @@ HTML = """
                         updateConnectionStatus('connected');
                         addLog('✅ Autorizado com sucesso!', 'success');
                         
+                        // NOVO: Atualizar informações da conta
+                        updateAccountInfo(data);
+                        
+                        // Inscrever para ticks
                         ws.send(JSON.stringify({
                             ticks: SYMBOL,
                             subscribe: 1
                         }));
                         addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
                         
+                        // NOVO: Inscrever para atualizações de saldo
+                        requestBalance();
+                        
                         startHeartbeat();
+                    }
+                    
+                    // NOVO: Processar atualizações de saldo
+                    if(data.msg_type === 'balance' && data.balance) {
+                        let balance = data.balance;
+                        document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
+                        addLog(`💰 Saldo atualizado: ${balance.currency} ${balance.balance.toFixed(2)}`, 'info');
                     }
                     
                     if(data.msg_type === 'tick' && data.tick) {
@@ -882,6 +1017,9 @@ HTML = """
                 ws.onclose = (event) => {
                     botState.connected = false;
                     updateConnectionStatus('disconnected');
+                    
+                    // Esconder informações da conta ao desconectar
+                    document.getElementById('accountInfo').style.display = 'none';
                     
                     if(event.code !== 1000) {
                         addLog(`❌ Conexão fechada (código ${event.code}). Reconectando em 5s...`, 'error');
@@ -963,7 +1101,7 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - OPÇÃO B MARTINGALE RÁPIDO
+        // ESTRATÉGIA PRINCIPAL - MANTIDA IGUAL (MARTINGALE CORRETO)
         // ============================================
         function executeStrategy(lastDigit) {
             // PASSO 1: Encontrar dígito com 0%
@@ -1024,7 +1162,7 @@ HTML = """
                 
                 if(lastDigit === botState.currentTradeDigit) {
                     // GANHOU!
-                    let profit = botState.purchasePrice * 7.343; // Lucro de 734.3%
+                    let profit = botState.purchasePrice * 7.343;
                     
                     botState.stats.profit += profit;
                     botState.stats.trades++;
