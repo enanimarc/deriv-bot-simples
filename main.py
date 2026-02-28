@@ -528,7 +528,7 @@ HTML = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 Deriv Bot - Dígito Matches (1-9)</h1>
+            <h1>🤖 Deriv Bot - Dígito Matches</h1>
             <p>Gráfico em tempo real | Ignora dígito 0 | Martingale 1.15x tick a tick</p>
         </div>
         
@@ -550,7 +550,7 @@ HTML = """
             </div>
         </div>
         
-        <!-- Informações da conta ADICIONADAS -->
+        <!-- Informações da conta -->
         <div class="account-info" id="accountInfo" style="display: none;">
             <div class="account-badge" id="accountBadge">
                 <span id="accountTypeIcon">💰</span>
@@ -849,7 +849,6 @@ HTML = """
             botState.account.loginid = loginid;
             botState.account.balance = balance;
             botState.account.currency = currency;
-            botState.lastBalance = balance;
             
             let accountType = '';
             let accountTypeIcon = '';
@@ -956,7 +955,7 @@ HTML = """
                         botState.connected = true;
                         updateConnectionStatus('connected');
                         
-                        // ADICIONADO: Atualizar informações da conta
+                        // Atualizar informações da conta
                         updateAccountInfo(data);
                         
                         // Inscrever para ticks
@@ -966,7 +965,7 @@ HTML = """
                         }));
                         addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
                         
-                        // ADICIONADO: Inscrever para atualizações de saldo
+                        // Inscrever para atualizações de saldo
                         ws.send(JSON.stringify({
                             balance: 1,
                             subscribe: 1
@@ -975,13 +974,18 @@ HTML = """
                         startHeartbeat();
                     }
                     
-                    // ADICIONADO: Atualização de saldo em tempo real
+                    // Atualização de saldo em tempo real
                     if(data.msg_type === 'balance') {
                         if (data.balance) {
                             let balance = data.balance;
                             botState.account.balance = balance.balance;
                             document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
                             document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
+                            
+                            if (balance.balance !== botState.lastBalance) {
+                                addLog(`💰 Saldo atualizado: ${balance.currency} ${balance.balance.toFixed(2)}`, 'info');
+                                botState.lastBalance = balance.balance;
+                            }
                         }
                     }
                     
@@ -1104,10 +1108,10 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL - MARTINGALE ORIGINAL (SEM ALTERAÇÕES)
+        // ESTRATÉGIA PRINCIPAL - OPÇÃO B MARTINGALE RÁPIDO (ORIGINAL)
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Encontrar dígito com 0% (apenas 1-9)
+            // PASSO 1: Encontrar dígito com 0%
             if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 
                 let zeroDigit = null;
@@ -1160,17 +1164,18 @@ HTML = """
                 }
             }
             
-            // PASSO 4: Se está em posição, verificar resultado TICK A TICK
+            // PASSO 4: Monitorar resultado
             if(botState.inPosition && botState.currentTradeDigit !== null) {
                 
                 if(lastDigit === botState.currentTradeDigit) {
-                    // GANHOU! Dígito alvo apareceu
-                    let profit = botState.purchasePrice * 0.95;
+                    // GANHOU!
+                    let profit = botState.purchasePrice * 7.343; // Lucro de 734.3%
+                    
                     botState.stats.profit += profit;
                     botState.stats.trades++;
                     botState.stats.wins++;
                     
-                    addLog(`💰 VENDA! Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
+                    addLog(`💰 VENDA! Dígito ${lastDigit} saiu! | Stake: $${botState.purchasePrice.toFixed(2)} | Lucro: $${profit.toFixed(2)}`, 'success');
                     
                     // Reset após vitória
                     botState.inPosition = false;
@@ -1186,12 +1191,14 @@ HTML = """
                     
                     updateStats();
                     
+                    // Verificar STOP WIN
                     if(botState.stats.profit >= botState.config.stopWin) {
                         addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
                         stopBot();
                         return;
                     }
                     
+                    // PASSO 5: Aguardar 5 segundos
                     addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
                     botState.waitingCompletion = true;
                     
@@ -1201,28 +1208,32 @@ HTML = """
                     }, 5000);
                     
                 } else {
-                    // PERDEU!
+                    // PERDEU! - OPÇÃO B: Fechar posição e já comprar NOVAMENTE no próximo tick
+                    
                     let loss = -botState.purchasePrice;
                     botState.stats.profit += loss;
                     botState.stats.trades++;
                     
                     addLog(`❌ PERDEU! Dígito ${lastDigit} não saiu (alvo era ${botState.currentTradeDigit}) - Prejuízo: $${Math.abs(loss).toFixed(2)}`, 'error');
                     
+                    // Verificar STOP LOSS
                     if(botState.stats.profit <= -botState.config.stopLoss) {
                         addLog('🛑 STOP LOSS ATINGIDO!', 'error');
                         stopBot();
                         return;
                     }
                     
+                    // Aplicar martingale
                     botState.stats.currentStake *= botState.config.gale;
                     botState.stats.galeCount++;
                     
                     addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
                     
+                    // IMPORTANTE: Fechar posição e preparar NOVA COMPRA para o próximo tick
                     botState.inPosition = false;
                     botState.entryTriggered = false;
                     
-                    // Já agendar a PRÓXIMA COMPRA para o próximo tick
+                    // Já comprar novamente no próximo tick
                     setTimeout(() => {
                         if(!botState.running || botState.inPosition) return;
                         
