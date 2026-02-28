@@ -528,8 +528,8 @@ HTML = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 Deriv Bot - Dígito Matches</h1>
-            <p>Gráfico em tempo real | API Real | Martingale Rápido tick a tick</p>
+            <h1>🤖 Deriv Bot - Dígito Matches (1-9)</h1>
+            <p>Gráfico em tempo real | Ignora dígito 0 | Martingale 1.15x tick a tick</p>
         </div>
         
         <div class="market-bar">
@@ -550,7 +550,7 @@ HTML = """
             </div>
         </div>
         
-        <!-- Informações da conta -->
+        <!-- Informações da conta ADICIONADAS -->
         <div class="account-info" id="accountInfo" style="display: none;">
             <div class="account-badge" id="accountBadge">
                 <span id="accountTypeIcon">💰</span>
@@ -684,7 +684,6 @@ HTML = """
                     </div>
                     
                     <div id="targetInfo" class="target-info"></div>
-                    <div id="contractInfo" style="margin-top: 10px; color: #888; font-size: 12px;"></div>
                 </div>
             </div>
         </div>
@@ -707,7 +706,6 @@ HTML = """
         let heartbeatInterval = null;
         let connectionAttempts = 0;
         let maxReconnectAttempts = 5;
-        let pendingProposal = null;
         
         let botState = {
             running: false,
@@ -722,8 +720,6 @@ HTML = """
             frequencies: Array(10).fill(0),
             currentTradeDigit: null,
             purchasePrice: 0,
-            currentContractId: null,
-            lastBalance: 0,
             stats: {
                 profit: 0,
                 trades: 0,
@@ -901,189 +897,6 @@ HTML = """
         }
         
         // ============================================
-        // FUNÇÕES DE TRANSAÇÃO REAL - API DERIV
-        // ============================================
-        
-        function requestProposal(digit, amount) {
-            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) {
-                addLog('❌ Não conectado à Deriv', 'error');
-                return;
-            }
-            
-            let proposalRequest = {
-                proposal: 1,
-                amount: amount,
-                barrier: digit.toString(),
-                basis: "stake",
-                contract_type: "DIGITMATCH",
-                currency: botState.account.currency || "USD",
-                duration: 1,
-                duration_unit: "t",
-                symbol: SYMBOL
-            };
-            
-            addLog(`📝 Solicitando proposta para dígito ${digit} com stake $${amount.toFixed(2)}`, 'info');
-            ws.send(JSON.stringify(proposalRequest));
-        }
-        
-        function handleProposalResponse(data) {
-            if (data.error) {
-                addLog(`❌ Erro na proposta: ${data.error.message}`, 'error');
-                botState.entryTriggered = false;
-                return;
-            }
-            
-            let proposal = data.proposal;
-            let payout = parseFloat(proposal.payout);
-            let stake = parseFloat(proposal.ask_price);
-            let profit = payout - stake;
-            let return_pct = ((profit / stake) * 100).toFixed(1);
-            
-            addLog(`📊 Proposta recebida: Stake: $${stake.toFixed(2)} | Payout: $${payout.toFixed(2)} | Lucro: $${profit.toFixed(2)} | Retorno: ${return_pct}%`, 'success');
-            
-            pendingProposal = {
-                id: proposal.id,
-                stake: stake,
-                payout: payout,
-                digit: parseInt(proposal.barrier)
-            };
-            
-            document.getElementById('contractInfo').innerHTML = `
-                Stake: $${stake.toFixed(2)} | Payout: $${payout.toFixed(2)} | Retorno: ${return_pct}%
-            `;
-            
-            // Executar compra automaticamente
-            if (botState.entryTriggered) {
-                executeBuy(proposal.id, stake);
-            }
-        }
-        
-        function executeBuy(proposalId, price) {
-            if (!ws || ws.readyState !== WebSocket.OPEN || !botState.connected) {
-                addLog('❌ Não conectado à Deriv', 'error');
-                return;
-            }
-            
-            let buyRequest = {
-                buy: proposalId,
-                price: price
-            };
-            
-            addLog(`💵 Executando compra do contrato...`, 'warning');
-            ws.send(JSON.stringify(buyRequest));
-        }
-        
-        function handleBuyResponse(data) {
-            if (data.error) {
-                addLog(`❌ Erro na compra: ${data.error.message}`, 'error');
-                pendingProposal = null;
-                botState.entryTriggered = false;
-                return;
-            }
-            
-            let buy = data.buy;
-            botState.currentContractId = buy.contract_id;
-            botState.inPosition = true;
-            botState.purchasePrice = buy.buy_price;
-            botState.currentTradeDigit = botState.targetDigit;
-            
-            let payout = buy.payout || 0;
-            
-            addLog(`✅ CONTRATO COMPRADO! ID: ${buy.contract_id} | Preço: $${botState.purchasePrice.toFixed(2)} | Payout: $${payout.toFixed(2)}`, 'success');
-            
-            document.getElementById('contractInfo').innerHTML = `
-                ✅ Contrato ativo | ID: ${buy.contract_id} | Stake: $${botState.purchasePrice.toFixed(2)}
-            `;
-            
-            pendingProposal = null;
-            botState.entryTriggered = false;
-        }
-        
-        // ============================================
-        // FUNÇÃO PARA PROCESSAR FIM DO CONTRATO
-        // ============================================
-        function handleContractClosed(contract) {
-            let profit = parseFloat(contract.profit) || 0;
-            
-            botState.stats.trades++;
-            botState.stats.profit += profit;
-            
-            if (profit > 0) {
-                // ============================================
-                // GANHOU
-                // ============================================
-                botState.stats.wins++;
-                addLog(`💰 GANHOU! Lucro: $${profit.toFixed(2)}`, 'success');
-                
-                // Reset após vitória
-                botState.inPosition = false;
-                botState.targetDigit = null;
-                botState.currentTradeDigit = null;
-                botState.entryTriggered = false;
-                botState.stats.currentStake = botState.config.stake;
-                botState.stats.galeCount = 0;
-                
-                document.getElementById('predictionDigit').innerHTML = '-';
-                document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
-                document.getElementById('targetInfo').style.display = 'none';
-                
-                updateStats();
-                
-                if(botState.stats.profit >= botState.config.stopWin) {
-                    addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
-                    stopBot();
-                    return;
-                }
-                
-                addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
-                botState.waitingCompletion = true;
-                
-                setTimeout(() => {
-                    botState.waitingCompletion = false;
-                    addLog('✅ Pronto para nova análise', 'success');
-                }, 5000);
-                
-            } else {
-                // ============================================
-                // PERDEU - MARTINGALE RÁPIDO (QUE FUNCIONAVA)
-                // ============================================
-                addLog(`❌ PERDEU! Prejuízo: $${Math.abs(profit).toFixed(2)}`, 'error');
-                
-                if(botState.stats.profit <= -botState.config.stopLoss) {
-                    addLog('🛑 STOP LOSS ATINGIDO!', 'error');
-                    stopBot();
-                    return;
-                }
-                
-                // Aplicar martingale
-                botState.stats.currentStake *= botState.config.gale;
-                botState.stats.galeCount++;
-                
-                addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
-                
-                // Fechar posição
-                botState.inPosition = false;
-                botState.entryTriggered = false;
-                
-                // JÁ COMPRAR NOVAMENTE NO PRÓXIMO TICK (com setTimeout de 100ms)
-                setTimeout(() => {
-                    if(!botState.running || botState.inPosition) return;
-                    
-                    botState.inPosition = true;
-                    botState.purchasePrice = botState.stats.currentStake;
-                    
-                    addLog(`✅ NOVA COMPRA (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'success');
-                    
-                    // Solicitar proposta à API
-                    requestProposal(botState.currentTradeDigit, botState.stats.currentStake);
-                    
-                }, 100); // Delay de 100ms - ESSENCIAL PARA FUNCIONAR
-                
-                updateStats();
-            }
-        }
-        
-        // ============================================
         // CONEXÃO DERIV
         // ============================================
         function connectDeriv() {
@@ -1143,42 +956,32 @@ HTML = """
                         botState.connected = true;
                         updateConnectionStatus('connected');
                         
+                        // ADICIONADO: Atualizar informações da conta
                         updateAccountInfo(data);
                         
-                        setTimeout(() => {
-                            ws.send(JSON.stringify({
-                                ticks: SYMBOL,
-                                subscribe: 1
-                            }));
-                            addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
-                            
-                            ws.send(JSON.stringify({
-                                balance: 1,
-                                subscribe: 1
-                            }));
-                            addLog(`💰 Inscrito para atualizações de saldo em tempo real`, 'success');
-                            
-                        }, 500);
+                        // Inscrever para ticks
+                        ws.send(JSON.stringify({
+                            ticks: SYMBOL,
+                            subscribe: 1
+                        }));
+                        addLog(`📡 Inscrito em ${SYMBOL}`, 'success');
+                        
+                        // ADICIONADO: Inscrever para atualizações de saldo
+                        ws.send(JSON.stringify({
+                            balance: 1,
+                            subscribe: 1
+                        }));
                         
                         startHeartbeat();
                     }
                     
+                    // ADICIONADO: Atualização de saldo em tempo real
                     if(data.msg_type === 'balance') {
-                        if (data.error) {
-                            addLog(`❌ Erro ao obter saldo: ${data.error.message}`, 'error');
-                            return;
-                        }
-                        
                         if (data.balance) {
                             let balance = data.balance;
                             botState.account.balance = balance.balance;
                             document.getElementById('accountBalance').innerHTML = balance.balance.toFixed(2);
                             document.getElementById('accountCurrency').innerHTML = balance.currency || 'USD';
-                            
-                            if (Math.abs(balance.balance - botState.lastBalance) > 0.01) {
-                                addLog(`💰 Saldo atualizado: ${balance.currency} ${balance.balance.toFixed(2)}`, 'info');
-                                botState.lastBalance = balance.balance;
-                            }
                         }
                     }
                     
@@ -1205,29 +1008,6 @@ HTML = """
                         }
                     }
                     
-                    if(data.msg_type === 'proposal' && data.proposal) {
-                        handleProposalResponse(data);
-                    }
-                    
-                    if(data.msg_type === 'buy' && data.buy) {
-                        handleBuyResponse(data);
-                        
-                        ws.send(JSON.stringify({
-                            proposal_open_contract: 1,
-                            subscribe: 1,
-                            contract_id: data.buy.contract_id
-                        }));
-                    }
-                    
-                    if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
-                        let contract = data.proposal_open_contract;
-                        
-                        if (contract.is_sold === 1) {
-                            handleContractClosed(contract);
-                            botState.currentContractId = null;
-                        }
-                    }
-                    
                     if(data.msg_type === 'ping') {
                         ws.send(JSON.stringify({ pong: data.ping }));
                     }
@@ -1241,6 +1021,7 @@ HTML = """
                     botState.connected = false;
                     updateConnectionStatus('disconnected');
                     
+                    // Esconder informações da conta ao desconectar
                     document.getElementById('accountInfo').style.display = 'none';
                     
                     if(event.code !== 1000) {
@@ -1323,11 +1104,11 @@ HTML = """
         }
         
         // ============================================
-        // ESTRATÉGIA PRINCIPAL
+        // ESTRATÉGIA PRINCIPAL - MARTINGALE ORIGINAL (SEM ALTERAÇÕES)
         // ============================================
         function executeStrategy(lastDigit) {
-            // PASSO 1: Encontrar dígito com 0% (apenas primeira entrada)
-            if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion && botState.currentTradeDigit === null) {
+            // PASSO 1: Encontrar dígito com 0% (apenas 1-9)
+            if(botState.targetDigit === null && !botState.inPosition && !botState.waitingCompletion) {
                 
                 let zeroDigit = null;
                 for(let i = 1; i <= 9; i++) {
@@ -1351,22 +1132,108 @@ HTML = """
                 }
             }
             
-            // PASSO 2: Aguardar atingir 8% (apenas primeira entrada)
-            if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered && botState.currentTradeDigit === null) {
+            // PASSO 2: Aguardar atingir 8%
+            if(botState.targetDigit !== null && !botState.inPosition && !botState.entryTriggered) {
                 let currentPercent = botState.frequencies[botState.targetDigit];
                 document.getElementById('predictionStatus').innerHTML = `Aguardando 8% (atual: ${currentPercent.toFixed(1)}%)`;
                 document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit}: ${currentPercent.toFixed(1)}% - Aguardando 8%`;
                 
                 if(currentPercent >= 8) {
                     botState.entryTriggered = true;
-                    botState.currentTradeDigit = botState.targetDigit;
                     
                     document.getElementById('predictionStatus').innerHTML = `📊 Atingiu 8%! Comprando...`;
                     document.getElementById('targetInfo').innerHTML = `📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Comprando...`;
                     
                     addLog(`📊 Dígito ${botState.targetDigit} atingiu ${currentPercent.toFixed(1)}%! Comprando...`, 'warning');
                     
-                    requestProposal(botState.targetDigit, botState.stats.currentStake);
+                    // PASSO 3: Comprar no próximo tick
+                    setTimeout(() => {
+                        if(!botState.running) return;
+                        
+                        botState.inPosition = true;
+                        botState.currentTradeDigit = botState.targetDigit;
+                        botState.purchasePrice = botState.stats.currentStake;
+                        
+                        addLog(`✅ COMPRA: $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.targetDigit}`, 'success');
+                        
+                    }, 100);
+                }
+            }
+            
+            // PASSO 4: Se está em posição, verificar resultado TICK A TICK
+            if(botState.inPosition && botState.currentTradeDigit !== null) {
+                
+                if(lastDigit === botState.currentTradeDigit) {
+                    // GANHOU! Dígito alvo apareceu
+                    let profit = botState.purchasePrice * 0.95;
+                    botState.stats.profit += profit;
+                    botState.stats.trades++;
+                    botState.stats.wins++;
+                    
+                    addLog(`💰 VENDA! Dígito ${lastDigit} saiu! Lucro: $${profit.toFixed(2)}`, 'success');
+                    
+                    // Reset após vitória
+                    botState.inPosition = false;
+                    botState.targetDigit = null;
+                    botState.currentTradeDigit = null;
+                    botState.entryTriggered = false;
+                    botState.stats.currentStake = botState.config.stake;
+                    botState.stats.galeCount = 0;
+                    
+                    document.getElementById('predictionDigit').innerHTML = '-';
+                    document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
+                    document.getElementById('targetInfo').style.display = 'none';
+                    
+                    updateStats();
+                    
+                    if(botState.stats.profit >= botState.config.stopWin) {
+                        addLog('🎉 PARABÉNS! STOP WIN ATINGIDO!', 'success');
+                        stopBot();
+                        return;
+                    }
+                    
+                    addLog('⏱️ Aguardando 5 segundos para nova análise...', 'info');
+                    botState.waitingCompletion = true;
+                    
+                    setTimeout(() => {
+                        botState.waitingCompletion = false;
+                        addLog('✅ Pronto para nova análise', 'success');
+                    }, 5000);
+                    
+                } else {
+                    // PERDEU!
+                    let loss = -botState.purchasePrice;
+                    botState.stats.profit += loss;
+                    botState.stats.trades++;
+                    
+                    addLog(`❌ PERDEU! Dígito ${lastDigit} não saiu (alvo era ${botState.currentTradeDigit}) - Prejuízo: $${Math.abs(loss).toFixed(2)}`, 'error');
+                    
+                    if(botState.stats.profit <= -botState.config.stopLoss) {
+                        addLog('🛑 STOP LOSS ATINGIDO!', 'error');
+                        stopBot();
+                        return;
+                    }
+                    
+                    botState.stats.currentStake *= botState.config.gale;
+                    botState.stats.galeCount++;
+                    
+                    addLog(`📈 MARTINGALE ${botState.stats.galeCount}: Nova stake $${botState.stats.currentStake.toFixed(2)} para o mesmo dígito ${botState.currentTradeDigit}`, 'warning');
+                    
+                    botState.inPosition = false;
+                    botState.entryTriggered = false;
+                    
+                    // Já agendar a PRÓXIMA COMPRA para o próximo tick
+                    setTimeout(() => {
+                        if(!botState.running || botState.inPosition) return;
+                        
+                        botState.inPosition = true;
+                        botState.purchasePrice = botState.stats.currentStake;
+                        
+                        addLog(`✅ NOVA COMPRA (GALE ${botState.stats.galeCount}): $${botState.stats.currentStake.toFixed(2)} no dígito ${botState.currentTradeDigit}`, 'success');
+                        
+                    }, 100);
+                    
+                    updateStats();
                 }
             }
         }
@@ -1419,8 +1286,6 @@ HTML = """
             botState.inPosition = false;
             botState.waitingCompletion = false;
             botState.currentTradeDigit = null;
-            botState.currentContractId = null;
-            pendingProposal = null;
             
             if(countdownInterval) clearInterval(countdownInterval);
             if(analysisTimer) clearTimeout(analysisTimer);
@@ -1436,7 +1301,6 @@ HTML = """
             document.getElementById('predictionDigit').innerHTML = '-';
             document.getElementById('predictionStatus').innerHTML = 'Parado';
             document.getElementById('targetInfo').style.display = 'none';
-            document.getElementById('contractInfo').innerHTML = '';
             
             updateConnectionStatus('disconnected');
             addLog('⏹️ Robô parado', 'error');
