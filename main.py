@@ -283,6 +283,10 @@ HTML = """
             currentContractId: null,
             currentTradeDigit: null,
             purchasePrice: 0,
+            
+            // Proposal (cotação) - NOVAS VARIÁVEIS
+            pendingProposalId: null,
+            pendingStake: 0,
 
             // Estatísticas da sessão
             stats: {
@@ -518,6 +522,29 @@ HTML = """
                         }
                     }
                 }
+                
+                // ── PROPOSAL — Resposta da cotação ──────────────────────────
+                if(data.msg_type === 'proposal') {
+                    if(data.error) {
+                        addLog('❌ Erro no proposal: ' + data.error.message, 'error');
+                        botState.inPosition     = false;
+                        botState.entryTriggered = false;
+                        return;
+                    }
+
+                    let proposal = data.proposal;
+                    botState.pendingProposalId = proposal.id;
+
+                    addLog(
+                        `✅ [PROPOSAL OK] ID: ${proposal.id} | ` +
+                        `Payout estimado: $${parseFloat(proposal.payout).toFixed(2)} | ` +
+                        `Preço: $${parseFloat(proposal.ask_price).toFixed(2)}`,
+                        'success'
+                    );
+
+                    // Compra imediatamente com o proposal_id
+                    executeBuy(proposal.id, botState.pendingStake);
+                }
 
                 // ── COMPRA (BUY) — RESPOSTA DA ORDEM REAL ───────────
                 if(data.msg_type === 'buy') {
@@ -579,6 +606,8 @@ HTML = """
                         botState.currentTradeDigit = null;
                         botState.entryTriggered    = false;
                         botState.waitingFor8pct    = false;
+                        botState.pendingProposalId = null;
+                        botState.pendingStake      = 0;
                         botState.stats.currentStake = botState.config.stake;
                         botState.stats.galeCount   = 0;
 
@@ -636,10 +665,10 @@ HTML = """
                             'warning'
                         );
 
-                        // Recompra imediata no mesmo dígito
+                        // Recompra imediata no mesmo dígito (agora via proposal)
                         setTimeout(() => {
                             if(botState.running && !botState.inPosition) {
-                                placeBuyOrder(botState.currentTradeDigit, botState.stats.currentStake);
+                                sendProposal(botState.currentTradeDigit, botState.stats.currentStake);
                             }
                         }, 200);
                     }
@@ -688,47 +717,64 @@ HTML = """
         }
 
         // ============================================================
-        // *** FUNÇÃO QUE ENVIA ORDEM REAL PARA A DERIV API ***
+        // ETAPA 1 — Envia PROPOSAL (cotação) para a Deriv
         // ============================================================
-        function placeBuyOrder(digit, stake) {
+        function sendProposal(digit, stake) {
             if(!ws || ws.readyState !== WebSocket.OPEN) {
-                addLog('❌ WebSocket fechado. Não foi possível enviar ordem.', 'error');
+                addLog('❌ WebSocket fechado. Não foi possível enviar proposta.', 'error');
                 return;
             }
 
             botState.inPosition        = true;
             botState.currentTradeDigit = digit;
-            botState.purchasePrice     = stake;
+            botState.pendingStake      = stake;
 
-            // Monta o payload de compra real via API Deriv
+            // ✅ CORRETO: barrier como STRING, sem 'prediction'
+            let proposalPayload = {
+                proposal:      1,
+                amount:        parseFloat(stake.toFixed(2)),
+                basis:         'stake',
+                contract_type: 'DIGITMATCH',
+                currency:      botState.currency,
+                duration:      1,
+                duration_unit: 't',
+                symbol:        SYMBOL,
+                barrier:       digit.toString()   // ← "5", não prediction: 5
+            };
+
+            ws.send(JSON.stringify(proposalPayload));
+
+            addLog(
+                `📋 [PROPOSAL] Solicitando cotação | Dígito: ${digit} | Stake: $${stake.toFixed(2)}`,
+                'info'
+            );
+            document.getElementById('predictionStatus').innerHTML = '⏳ Obtendo cotação...';
+        }
+
+        // ============================================================
+        // ETAPA 2 — Executa a COMPRA com o proposal_id recebido
+        // ============================================================
+        function executeBuy(proposalId, stake) {
+            if(!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('❌ WebSocket fechado ao tentar comprar.', 'error');
+                botState.inPosition = false;
+                return;
+            }
+
             let buyPayload = {
-                buy: 1,
-                subscribe: 1,           // Monitora o contrato em tempo real
-                price: stake,           // Valor máximo que aceita pagar
-                parameters: {
-                    amount:        stake,
-                    basis:         'stake',
-                    contract_type: 'DIGITMATCH',
-                    currency:      botState.currency,
-                    duration:      1,
-                    duration_unit: 't',    // 't' = ticks
-                    symbol:        SYMBOL,
-                    prediction:    digit   // ← DÍGITO ALVO
-                }
+                buy:   proposalId,           // ← ID retornado pela Deriv
+                price: parseFloat(stake.toFixed(2))
             };
 
             ws.send(JSON.stringify(buyPayload));
 
             addLog(
-                `📤 [ORDEM ENVIADA] DIGITMATCH | ` +
-                `Dígito: ${digit} | ` +
-                `Stake: $${stake.toFixed(2)} | ` +
-                `Conta: ${botState.accountType.toUpperCase()}`,
+                `📤 [ORDEM REAL] Comprando proposal ${proposalId} | ` +
+                `Dígito: ${botState.currentTradeDigit} | ` +
+                `Stake: $${stake.toFixed(2)} | Conta: ${botState.accountType.toUpperCase()}`,
                 'warning'
             );
-
-            document.getElementById('predictionStatus').innerHTML =
-                `⏳ Ordem enviada | Aguardando resultado...`;
+            document.getElementById('predictionStatus').innerHTML = '⏳ Ordem enviada | Aguardando resultado...';
         }
 
         // ============================================================
@@ -772,8 +818,8 @@ HTML = """
                         'warning'
                     );
 
-                    // ─── ENVIA ORDEM REAL À DERIV ───
-                    placeBuyOrder(botState.targetDigit, botState.stats.currentStake);
+                    // ─── ENVIA PROPOSAL (cotação) À DERIV ───
+                    sendProposal(botState.targetDigit, botState.stats.currentStake);
                 }
             }
         }
@@ -826,6 +872,8 @@ HTML = """
             botState.waitingFor8pct  = false;
             botState.currentTradeDigit = null;
             botState.entryTriggered  = false;
+            botState.pendingProposalId = null;
+            botState.pendingStake      = 0;
 
             if(countdownInterval) clearInterval(countdownInterval);
             if(analysisTimer)     clearTimeout(analysisTimer);
