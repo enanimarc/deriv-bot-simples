@@ -98,7 +98,7 @@ HTML = """
 
     <div class="header">
         <h1>🤖 Deriv Bot - Dígito Matches <span class="trade-badge badge-demo" id="accountBadge">DEMO</span></h1>
-        <p>Operações REAIS via API Deriv | Volatility 100 | Martingale 1.15x</p>
+        <p>Operações REAIS via API Deriv | Volatility 100 | Martingale tick-a-tick</p>
     </div>
 
     <div class="market-bar">
@@ -124,7 +124,6 @@ HTML = """
     </div>
 
     <div class="main-grid">
-        <!-- GRÁFICO -->
         <div class="chart-panel">
             <div class="chart-header">
                 <div class="chart-title">📊 Frequência dos Dígitos 1-9 — Últimos 25 ticks</div>
@@ -150,7 +149,6 @@ HTML = """
             </div>
         </div>
 
-        <!-- PAINEL DE TRADING -->
         <div class="trading-panel">
             <div class="balance-box">
                 <div>
@@ -205,7 +203,7 @@ HTML = """
             </div>
 
             <div class="warning-box" id="warningBox">
-                ⚠️ <strong>ATENÇÃO:</strong> Conta REAL detectada! As operações serão executadas com dinheiro real.
+                ⚠️ <strong>ATENÇÃO:</strong> Conta REAL detectada! Operações com dinheiro real.
             </div>
 
             <div class="config-box">
@@ -247,54 +245,56 @@ HTML = """
 
 <script>
 // ================================================================
-// CONFIGURAÇÃO DERIV API
+// CONFIGURAÇÃO
 // ================================================================
 const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
 const SYMBOL       = 'R_100';
 
-// ================================================================
-// ESTADO GLOBAL DO BOT
-// ================================================================
-let ws               = null;
-let reconnectTimer   = null;
+let ws                = null;
+let reconnectTimer    = null;
 let heartbeatInterval = null;
 let connectionAttempts = 0;
-const MAX_RECONNECT  = 5;
+const MAX_RECONNECT   = 5;
 
+// ================================================================
+// ESTADO GLOBAL
+// ================================================================
 let botState = {
-    running:        false,
-    connected:      false,
-    authorized:     false,
-    token:          '',
-    accountType:    'demo',
-    currency:       'USD',
-    balance:        0,
+    running:         false,
+    connected:       false,
+    authorized:      false,
+    token:           '',
+    accountType:     'demo',
+    currency:        'USD',
+    balance:         0,
 
     // Análise de dígitos
-    tickHistory:    [],
-    frequencies:    Array(10).fill(0),
+    tickHistory:     [],
+    frequencies:     Array(10).fill(0),
 
     // Fluxo de entrada
-    targetDigit:    null,
-    waitingFor8pct: false,
-    entryTriggered: false,
+    targetDigit:     null,
+    waitingFor8pct:  false,
+    entryTriggered:  false,
     analysisStarted: false,
 
     // Contrato ativo
     inPosition:         false,
     currentContractId:  null,
     currentTradeDigit:  null,
-    purchasePrice:      0,
 
-    // ── NOVO ── flags de controle tick-a-tick
-    pendingMartingale:  false,   // aguarda próximo tick para reentrar (gale)
-    sellSent:           false,   // evita duplo sell no mesmo contrato
+    // ── MÁQUINA DE ESTADOS TICK-A-TICK ────────────────────────
+    // Após BUY confirmado: o PRÓXIMO tick é o tick de resultado.
+    // Após LOSS no tick: o PRÓXIMO tick dispara o Martingale.
+    waitingForResultTick:   false,  // true = aguarda tick de resultado
+    pendingMartingale:      false,  // true = dispara Gale no próximo tick
+    galeAppliedForContract: false,  // evita duplo cálculo de gale (tick x poc)
+    // ──────────────────────────────────────────────────────────
 
-    // Fluxo proposal → buy (2 etapas)
-    pendingProposalId:  null,
-    pendingStake:       0,
+    // Proposal → Buy
+    pendingProposalId: null,
+    pendingStake:      0,
 
-    // Estatísticas
     stats: {
         profit:       0,
         trades:       0,
@@ -303,7 +303,6 @@ let botState = {
         galeCount:    0
     },
 
-    // Configurações
     config: {
         stake:    0.35,
         gale:     1.15,
@@ -319,7 +318,7 @@ let analysisTimer     = null;
 // GRÁFICO DE BARRAS
 // ================================================================
 function initBars() {
-    let c    = document.getElementById('barsContainer');
+    let c = document.getElementById('barsContainer');
     let html = '';
     for(let i = 1; i <= 9; i++) {
         html += `<div class="bar-wrapper">
@@ -360,13 +359,13 @@ function addLog(msg, type = 'info') {
 }
 
 // ================================================================
-// ATUALIZA UI
+// UI
 // ================================================================
 function updateStats() {
     let p  = botState.stats.profit;
     let el = document.getElementById('totalProfit');
-    el.innerHTML  = (p >= 0 ? '+' : '') + '$' + p.toFixed(2);
-    el.className  = 'profit-value ' + (p >= 0 ? 'profit-positive' : 'profit-negative');
+    el.innerHTML = (p >= 0 ? '+' : '') + '$' + p.toFixed(2);
+    el.className = 'profit-value ' + (p >= 0 ? 'profit-positive' : 'profit-negative');
     document.getElementById('currentStake').innerHTML = '$' + botState.stats.currentStake.toFixed(2);
     document.getElementById('galeCount').innerHTML    = botState.stats.galeCount;
     document.getElementById('tradeCount').innerHTML   = botState.stats.trades;
@@ -424,25 +423,7 @@ function calculateFrequencies() {
 }
 
 // ================================================================
-// ── NOVO ── VENDE CONTRATO QUANDO DÍGITO DA PREVISÃO APARECE
-// Chamado tick-a-tick enquanto inPosition=true
-// ================================================================
-function sellContract(contractId) {
-    if(!ws || ws.readyState !== WebSocket.OPEN) return;
-
-    ws.send(JSON.stringify({ sell: contractId, price: 0 }));
-
-    addLog(
-        `💰 [SELL] Dígito ${botState.currentTradeDigit} apareceu! ` +
-        `Vendendo contrato ${contractId}...`,
-        'success'
-    );
-    document.getElementById('predictionStatus').innerHTML =
-        '💰 Dígito apareceu — Vendendo contrato (WIN)...';
-}
-
-// ================================================================
-// WEBSOCKET — CONEXÃO
+// WEBSOCKET
 // ================================================================
 function connectDeriv() {
     let token = document.getElementById('token').value.trim();
@@ -468,7 +449,6 @@ function establishConnection() {
         }
     }, 10000);
 
-    // ------------------------------------------------------------
     ws.onopen = () => {
         clearTimeout(timeout);
         connectionAttempts = 0;
@@ -476,9 +456,9 @@ function establishConnection() {
         ws.send(JSON.stringify({ authorize: botState.token }));
     };
 
-    // ------------------------------------------------------------
+    // ============================================================
     // HANDLER PRINCIPAL DE MENSAGENS
-    // ------------------------------------------------------------
+    // ============================================================
     ws.onmessage = (event) => {
         let data = JSON.parse(event.data);
 
@@ -520,10 +500,7 @@ function establishConnection() {
             );
 
             ws.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
-            addLog(`📡 Inscrito em ticks: ${SYMBOL}`, 'info');
-
             ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-
             startHeartbeat();
         }
 
@@ -543,40 +520,84 @@ function establishConnection() {
                 if(botState.tickHistory.length > 25) botState.tickHistory.shift();
                 calculateFrequencies();
 
-                // ── NOVO ── 1. Verifica WIN: dígito alvo apareceu durante posição aberta
-                //    Envia sell imediatamente (1 chamada por contrato, protegida por sellSent)
-                if(
-                    botState.inPosition &&
-                    botState.currentContractId &&
-                    !botState.sellSent &&
-                    digit === botState.currentTradeDigit
-                ) {
-                    botState.sellSent = true;
-                    sellContract(botState.currentContractId);
+                // ════════════════════════════════════════════════
+                // PRIORIDADE 1 ── TICK DE RESULTADO DO CONTRATO
+                // Detecta WIN/LOSS direto do tick, sem esperar poc
+                // ════════════════════════════════════════════════
+                if(botState.waitingForResultTick && botState.currentContractId) {
+                    botState.waitingForResultTick = false;
+
+                    if(digit === botState.currentTradeDigit) {
+                        // ✅ WIN detectado no tick
+                        addLog(
+                            `🎯 [TICK WIN] Dígito ${digit} acertou! ` +
+                            `Aguardando confirmação do contrato...`,
+                            'success'
+                        );
+                        document.getElementById('predictionStatus').innerHTML =
+                            '💰 WIN detectado! Confirmando saldo...';
+                        botState.inPosition = false;
+                        // Reset completo virá via proposal_open_contract
+
+                    } else {
+                        // ❌ LOSS detectado no tick
+                        // Aplica gale UMA vez (flag galeAppliedForContract)
+                        if(!botState.galeAppliedForContract) {
+                            botState.galeAppliedForContract = true;
+                            botState.stats.currentStake = parseFloat(
+                                (botState.stats.currentStake * botState.config.gale).toFixed(2)
+                            );
+                            botState.stats.galeCount++;
+                            updateStats();
+                        }
+                        botState.inPosition        = false;
+                        botState.pendingMartingale = true;
+
+                        addLog(
+                            `❌ [TICK LOSS] Dígito ${digit} ≠ ${botState.currentTradeDigit} | ` +
+                            `Gale #${botState.stats.galeCount} | ` +
+                            `Nova stake: $${botState.stats.currentStake.toFixed(2)} | ` +
+                            `⏳ Aguardando PRÓXIMO tick para comprar...`,
+                            'error'
+                        );
+                        document.getElementById('predictionStatus').innerHTML =
+                            `⏳ LOSS — Gale #${botState.stats.galeCount} no próximo tick...`;
+                        document.getElementById('lastResult').innerHTML  = `❌ Gale #${botState.stats.galeCount}`;
+                        document.getElementById('lastResult').style.color = '#f44336';
+                    }
+                    return; // encerra processamento deste tick
                 }
 
-                // ── NOVO ── 2. Martingale tick-a-tick
-                //    Após uma derrota, pendingMartingale=true.
-                //    Aqui no próximo tick (quando inPosition já é false) a reentrada acontece.
+                // ════════════════════════════════════════════════
+                // PRIORIDADE 2 ── MARTINGALE NO PRÓXIMO TICK
+                // Este é o tick imediatamente após o LOSS.
+                // Dispara a nova compra agora.
+                // ════════════════════════════════════════════════
                 if(botState.running && botState.pendingMartingale && !botState.inPosition) {
                     botState.pendingMartingale = false;
                     addLog(
-                        `🔄 [MARTINGALE TICK] Reentrando no dígito ${botState.currentTradeDigit} ` +
-                        `— Stake: $${botState.stats.currentStake.toFixed(2)}`,
+                        `🔄 [GALE #${botState.stats.galeCount}] ` +
+                        `Comprando no tick! ` +
+                        `Dígito: ${botState.currentTradeDigit} | ` +
+                        `Stake: $${botState.stats.currentStake.toFixed(2)}`,
                         'warning'
                     );
+                    document.getElementById('predictionStatus').innerHTML =
+                        `🔄 Gale #${botState.stats.galeCount} — Enviando proposta...`;
                     sendProposal(botState.currentTradeDigit, botState.stats.currentStake);
-                    return; // não executa executeStrategy neste tick
+                    return; // encerra processamento deste tick
                 }
 
-                // ── ESTRATÉGIA NORMAL (só quando não há martingale pendente) ──
+                // ════════════════════════════════════════════════
+                // PRIORIDADE 3 ── ESTRATÉGIA NORMAL
+                // ════════════════════════════════════════════════
                 if(botState.running && botState.analysisStarted && !botState.inPosition) {
                     executeStrategy();
                 }
             }
         }
 
-        // ── PROPOSAL — ETAPA 1: recebe cotação ──────────────────
+        // ── PROPOSAL — cotação recebida ──────────────────────────
         if(data.msg_type === 'proposal') {
             if(data.error) {
                 addLog('❌ Erro no proposal: ' + data.error.message, 'error');
@@ -584,68 +605,51 @@ function establishConnection() {
                 botState.entryTriggered = false;
                 return;
             }
-
-            let proposal           = data.proposal;
+            let proposal = data.proposal;
             botState.pendingProposalId = proposal.id;
 
             addLog(
-                `✅ [PROPOSAL OK] ID: ${proposal.id} | ` +
-                `Payout estimado: $${parseFloat(proposal.payout).toFixed(2)} | ` +
+                `📋 [PROPOSAL OK] ID: ${proposal.id} | ` +
+                `Payout: $${parseFloat(proposal.payout).toFixed(2)} | ` +
                 `Preço: $${parseFloat(proposal.ask_price).toFixed(2)}`,
-                'success'
+                'info'
             );
-
-            // Dispara imediatamente a ETAPA 2
             executeBuy(proposal.id, botState.pendingStake);
         }
 
-        // ── BUY — ETAPA 2: confirmação da compra ────────────────
+        // ── BUY — compra confirmada ──────────────────────────────
         if(data.msg_type === 'buy') {
             if(data.error) {
                 addLog('❌ Erro na compra: ' + data.error.message, 'error');
-                botState.inPosition     = false;
-                botState.entryTriggered = false;
+                botState.inPosition           = false;
+                botState.entryTriggered       = false;
+                botState.waitingForResultTick = false;
                 return;
             }
-
             let buy = data.buy;
-            botState.currentContractId = buy.contract_id;
-            botState.sellSent          = false; // ── NOVO ── reset para o novo contrato
+
+            // ── CENTRAL: ativa a escuta do próximo tick como resultado
+            botState.currentContractId      = buy.contract_id;
+            botState.waitingForResultTick   = true;  // ← PRÓXIMO TICK = RESULTADO
+            botState.galeAppliedForContract = false; // reset para este contrato
 
             addLog(
-                `✅ [COMPRA CONFIRMADA] Contrato: ${buy.contract_id} | ` +
-                `Dígito: ${botState.currentTradeDigit} | ` +
-                `Pago: $${parseFloat(buy.buy_price).toFixed(2)}`,
+                `✅ [BUY OK] Contrato: ${buy.contract_id} | ` +
+                `Dígito alvo: ${botState.currentTradeDigit} | ` +
+                `Stake: $${parseFloat(buy.buy_price).toFixed(2)} | ` +
+                `⏳ Aguardando próximo tick...`,
                 'success'
             );
             document.getElementById('predictionStatus').innerHTML =
-                '⏳ Contrato ativo | Monitorando dígito tick a tick...';
+                `⏳ Contrato ativo — aguardando próximo tick (resultado)...`;
         }
 
-        // ── SELL — resposta da venda antecipada ─────────────────
-        // ── NOVO ── bloco adicionado
-        if(data.msg_type === 'sell') {
-            if(data.error) {
-                // Contrato pode já ter expirado naturalmente — não é erro crítico
-                addLog(
-                    `⚠️ [SELL] ${data.error.message} — aguardando liquidação natural.`,
-                    'warning'
-                );
-            } else {
-                addLog(
-                    `✅ [SELL OK] Contrato ${data.sell.contract_id} vendido | ` +
-                    `Recebido: $${parseFloat(data.sell.sold_for).toFixed(2)}`,
-                    'success'
-                );
-            }
-            // O resultado definitivo chega via proposal_open_contract (is_sold: true)
-        }
-
-        // ── PROPOSAL_OPEN_CONTRACT — resultado do contrato ──────
+        // ── PROPOSAL_OPEN_CONTRACT — confirmação financeira ──────
+        // O tick já detectou WIN/LOSS. Aqui apenas:
+        // ✅ WIN  → reset completo + atualiza saldo + pausa 5s
+        // ❌ LOSS → atualiza saldo + verifica stop loss
         if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
-            let poc = data.proposal_open_contract;
-
-            // Aguarda finalização
+            let poc    = data.proposal_open_contract;
             if(!poc.is_sold) return;
 
             let profit = parseFloat(poc.profit);
@@ -654,101 +658,95 @@ function establishConnection() {
             botState.stats.trades++;
             botState.stats.profit += profit;
             if(isWin) botState.stats.wins++;
+            if(poc.balance_after) updateBalance(poc.balance_after, botState.currency);
 
-            if(poc.balance_after) {
-                updateBalance(poc.balance_after, botState.currency);
-            }
-
-            // ── GANHOU ──────────────────────────────────────────
+            // ── WIN ─────────────────────────────────────────────
             if(isWin) {
                 addLog(
-                    `💰 [RESULTADO] GANHOU! ` +
-                    `Lucro: +$${profit.toFixed(2)} | ` +
+                    `💰 [POC WIN] +$${profit.toFixed(2)} | ` +
+                    `Sessão: $${botState.stats.profit.toFixed(2)} | ` +
                     `Saldo: ${botState.balance} ${botState.currency}`,
                     'success'
                 );
                 document.getElementById('lastResult').innerHTML  = `✅ +$${profit.toFixed(2)}`;
                 document.getElementById('lastResult').style.color = '#4caf50';
 
-                // Reset completo após vitória
-                botState.inPosition        = false;
-                botState.currentContractId = null;
-                botState.targetDigit       = null;
-                botState.currentTradeDigit = null;
-                botState.entryTriggered    = false;
-                botState.waitingFor8pct    = false;
-                botState.pendingProposalId = null;
-                botState.pendingStake      = 0;
-                botState.stats.currentStake = botState.config.stake;
-                botState.stats.galeCount   = 0;
-                // ── NOVO ── limpa flags tick-a-tick
-                botState.pendingMartingale = false;
-                botState.sellSent          = false;
+                // Reset completo
+                botState.inPosition             = false;
+                botState.currentContractId      = null;
+                botState.targetDigit            = null;
+                botState.currentTradeDigit      = null;
+                botState.entryTriggered         = false;
+                botState.waitingFor8pct         = false;
+                botState.pendingProposalId      = null;
+                botState.pendingStake           = 0;
+                botState.waitingForResultTick   = false;
+                botState.pendingMartingale      = false;
+                botState.galeAppliedForContract = false;
+                botState.stats.currentStake     = botState.config.stake;
+                botState.stats.galeCount        = 0;
 
                 document.getElementById('predictionDigit').innerHTML  = '-';
-                document.getElementById('predictionStatus').innerHTML = 'Aguardando...';
+                document.getElementById('predictionStatus').innerHTML = 'Aguardando nova análise...';
                 document.getElementById('targetInfo').style.display   = 'none';
-
                 updateStats();
 
-                // Verifica Stop Win
                 if(botState.stats.profit >= botState.config.stopWin) {
                     addLog('🎉 STOP WIN ATINGIDO! Encerrando bot.', 'success');
                     stopBot();
                     return;
                 }
 
-                // Pausa 5s antes da próxima rodada
-                addLog('⏱️ Pausa de 5s antes da próxima análise...', 'info');
+                addLog('⏱️ WIN! Pausa de 5s antes da próxima análise...', 'info');
                 botState.running = false;
                 setTimeout(() => {
                     if(botState.connected) {
                         botState.running = true;
-                        addLog('🔍 Retomando análise...', 'info');
+                        addLog('🔍 Retomando análise de dígitos...', 'info');
                     }
                 }, 5000);
 
-            // ── PERDEU — Martingale tick-a-tick ─────────────────
+            // ── LOSS ─────────────────────────────────────────────
             } else {
-                addLog(
-                    `❌ [RESULTADO] PERDEU! ` +
-                    `Prejuízo: -$${Math.abs(profit).toFixed(2)} | ` +
-                    `Saldo: ${botState.balance} ${botState.currency}`,
-                    'error'
-                );
-                document.getElementById('lastResult').innerHTML  = `❌ -$${Math.abs(profit).toFixed(2)}`;
-                document.getElementById('lastResult').style.color = '#f44336';
+                // Gale já aplicado no tick handler.
+                // Caso raro (poc chegou antes do tick): aplica gale aqui.
+                if(!botState.galeAppliedForContract) {
+                    botState.galeAppliedForContract = true;
+                    botState.stats.currentStake = parseFloat(
+                        (botState.stats.currentStake * botState.config.gale).toFixed(2)
+                    );
+                    botState.stats.galeCount++;
+                    botState.inPosition           = false;
+                    botState.waitingForResultTick = false;
+                    botState.pendingMartingale    = true;
+                    addLog(
+                        `❌ [POC LOSS — poc chegou primeiro] ` +
+                        `-$${Math.abs(profit).toFixed(2)} | ` +
+                        `Gale #${botState.stats.galeCount} | ` +
+                        `Nova stake: $${botState.stats.currentStake.toFixed(2)} | ` +
+                        `⏳ Aguardando próximo tick...`,
+                        'error'
+                    );
+                    document.getElementById('lastResult').innerHTML  = `❌ Gale #${botState.stats.galeCount}`;
+                    document.getElementById('lastResult').style.color = '#f44336';
+                } else {
+                    addLog(
+                        `❌ [POC LOSS] -$${Math.abs(profit).toFixed(2)} | ` +
+                        `Sessão: $${botState.stats.profit.toFixed(2)} | ` +
+                        `Saldo: ${botState.balance} ${botState.currency} | ` +
+                        `Gale #${botState.stats.galeCount} — próximo tick...`,
+                        'error'
+                    );
+                }
+                updateStats();
 
-                // Verifica Stop Loss
+                // Verifica Stop Loss — cancela martingale se atingido
                 if(botState.stats.profit <= -botState.config.stopLoss) {
-                    addLog('🛑 STOP LOSS ATINGIDO! Encerrando bot.', 'error');
+                    addLog('🛑 STOP LOSS ATINGIDO! Cancelando martingale. Encerrando.', 'error');
+                    botState.pendingMartingale = false;
                     stopBot();
                     return;
                 }
-
-                // Aplica multiplicador de Martingale
-                botState.stats.currentStake = parseFloat(
-                    (botState.stats.currentStake * botState.config.gale).toFixed(2)
-                );
-                botState.stats.galeCount++;
-
-                // ── NOVO ── em vez de setTimeout 300ms,
-                //    sinaliza para o PRÓXIMO TICK executar a reentrada
-                botState.inPosition        = false;
-                botState.entryTriggered    = false;
-                botState.pendingProposalId = null;
-                botState.pendingStake      = 0;
-                botState.sellSent          = false;
-                botState.pendingMartingale = true;  // ← tick-a-tick
-
-                updateStats();
-
-                addLog(
-                    `📈 MARTINGALE #${botState.stats.galeCount} agendado para o próximo tick → ` +
-                    `Nova stake: $${botState.stats.currentStake.toFixed(2)} | ` +
-                    `Dígito: ${botState.currentTradeDigit}`,
-                    'warning'
-                );
             }
         }
 
@@ -768,7 +766,7 @@ function establishConnection() {
             addLog(`❌ Conexão fechada (${e.code}). Reconectando...`, 'error');
             handleReconnect();
         } else {
-            addLog('🔌 Conexão encerrada.', 'info');
+            addLog('🔌 Conexão encerrada normalmente.', 'info');
         }
     };
 }
@@ -781,21 +779,19 @@ function handleReconnect() {
             establishConnection();
         }, 5000);
     } else {
-        addLog('❌ Máximo de tentativas. Clique CONECTAR para tentar novamente.', 'error');
+        addLog('❌ Máximo de tentativas atingido. Clique CONECTAR.', 'error');
     }
 }
 
 function startHeartbeat() {
     if(heartbeatInterval) clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(() => {
-        if(ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ ping: 1 }));
-        }
+        if(ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
     }, 25000);
 }
 
 // ================================================================
-// ETAPA 1 — Envia PROPOSAL (cotação) à Deriv
+// ETAPA 1 — PROPOSAL
 // ================================================================
 function sendProposal(digit, stake) {
     if(!ws || ws.readyState !== WebSocket.OPEN) {
@@ -805,11 +801,13 @@ function sendProposal(digit, stake) {
         return;
     }
 
-    botState.inPosition        = true;
-    botState.currentTradeDigit = digit;
-    botState.pendingStake      = stake;
+    botState.inPosition             = true;
+    botState.currentTradeDigit      = digit;
+    botState.pendingStake           = stake;
+    botState.waitingForResultTick   = false; // será true só após buy confirmado
+    botState.galeAppliedForContract = false; // reset para novo contrato
 
-    let proposalPayload = {
+    ws.send(JSON.stringify({
         proposal:      1,
         amount:        parseFloat(stake.toFixed(2)),
         basis:         'stake',
@@ -819,19 +817,17 @@ function sendProposal(digit, stake) {
         duration_unit: 't',
         symbol:        SYMBOL,
         barrier:       digit.toString()
-    };
-
-    ws.send(JSON.stringify(proposalPayload));
+    }));
 
     addLog(
-        `📋 [PROPOSAL] Solicitando cotação | Dígito: ${digit} | Stake: $${stake.toFixed(2)}`,
+        `📋 [PROPOSAL] Dígito: ${digit} | Stake: $${stake.toFixed(2)}`,
         'info'
     );
     document.getElementById('predictionStatus').innerHTML = '⏳ Obtendo cotação...';
 }
 
 // ================================================================
-// ETAPA 2 — Executa COMPRA com o proposal_id recebido
+// ETAPA 2 — BUY
 // ================================================================
 function executeBuy(proposalId, stake) {
     if(!ws || ws.readyState !== WebSocket.OPEN) {
@@ -840,30 +836,26 @@ function executeBuy(proposalId, stake) {
         return;
     }
 
-    let buyPayload = {
+    ws.send(JSON.stringify({
         buy:       proposalId,
         price:     parseFloat(stake.toFixed(2)),
-        subscribe: 1
-    };
-
-    ws.send(JSON.stringify(buyPayload));
+        subscribe: 1   // OBRIGATÓRIO para receber proposal_open_contract
+    }));
 
     addLog(
-        `📤 [ORDEM ENVIADA] Proposal: ${proposalId} | ` +
+        `📤 [BUY] Proposal: ${proposalId} | ` +
         `Dígito: ${botState.currentTradeDigit} | ` +
         `Stake: $${stake.toFixed(2)} | ` +
         `Conta: ${botState.accountType.toUpperCase()}`,
         'warning'
     );
-    document.getElementById('predictionStatus').innerHTML =
-        '⏳ Ordem enviada | Monitorando dígito tick a tick...';
+    document.getElementById('predictionStatus').innerHTML = '⏳ Ordem enviada...';
 }
 
 // ================================================================
 // ESTRATÉGIA PRINCIPAL
 // ================================================================
 function executeStrategy() {
-
     // PASSO 1 — Encontra dígito com ~0%
     if(botState.targetDigit === null && !botState.waitingFor8pct) {
         let zeroDigit = null;
@@ -882,7 +874,7 @@ function executeStrategy() {
             document.getElementById('targetInfo').innerHTML =
                 `🎯 Dígito ${zeroDigit} (0%) — Aguardando atingir 8%`;
 
-            addLog(`🎯 Dígito alvo encontrado: ${zeroDigit} (0%)`, 'warning');
+            addLog(`🎯 Dígito alvo: ${zeroDigit} (0%) — Aguardando 8%...`, 'warning');
         }
     }
 
@@ -897,17 +889,16 @@ function executeStrategy() {
             botState.waitingFor8pct = false;
 
             addLog(
-                `📊 Dígito ${botState.targetDigit} atingiu ${cur.toFixed(1)}%! Enviando proposta...`,
+                `📊 Dígito ${botState.targetDigit} atingiu ${cur.toFixed(1)}%! Comprando...`,
                 'warning'
             );
-
             sendProposal(botState.targetDigit, botState.stats.currentStake);
         }
     }
 }
 
 // ================================================================
-// INICIAR / PARAR BOT
+// INICIAR / PARAR
 // ================================================================
 function startBot() {
     if(!botState.connected) { alert('Conecte-se à Deriv primeiro!'); return; }
@@ -931,8 +922,8 @@ function startBot() {
     if(analysisTimer) clearTimeout(analysisTimer);
     analysisTimer = setTimeout(() => {
         botState.analysisStarted = true;
-        addLog('🔍 Análise iniciada — Buscando dígito com 0%...', 'success');
-        document.getElementById('predictionStatus').innerHTML = 'Analisando...';
+        addLog('🔍 Análise iniciada — buscando dígito com 0%...', 'success');
+        document.getElementById('predictionStatus').innerHTML = 'Analisando dígitos...';
     }, 20000);
 
     let t = 20;
@@ -947,18 +938,18 @@ function startBot() {
 }
 
 function stopBot() {
-    botState.running           = false;
-    botState.analysisStarted   = false;
-    botState.targetDigit       = null;
-    botState.inPosition        = false;
-    botState.waitingFor8pct    = false;
-    botState.currentTradeDigit = null;
-    botState.entryTriggered    = false;
-    botState.pendingProposalId = null;
-    botState.pendingStake      = 0;
-    // ── NOVO ── limpa flags tick-a-tick
-    botState.pendingMartingale = false;
-    botState.sellSent          = false;
+    botState.running                = false;
+    botState.analysisStarted        = false;
+    botState.targetDigit            = null;
+    botState.inPosition             = false;
+    botState.waitingFor8pct         = false;
+    botState.currentTradeDigit      = null;
+    botState.entryTriggered         = false;
+    botState.pendingProposalId      = null;
+    botState.pendingStake           = 0;
+    botState.waitingForResultTick   = false;
+    botState.pendingMartingale      = false;
+    botState.galeAppliedForContract = false;
 
     if(countdownInterval)  clearInterval(countdownInterval);
     if(analysisTimer)      clearTimeout(analysisTimer);
@@ -976,9 +967,8 @@ function stopBot() {
 
     updateConnectionStatus('disconnected');
     addLog(
-        `⏹️ Bot parado. Sessão: $${botState.stats.profit.toFixed(2)} | ` +
-        `Trades: ${botState.stats.trades} | ` +
-        `Wins: ${botState.stats.wins}`,
+        `⏹️ Bot parado | Sessão: $${botState.stats.profit.toFixed(2)} | ` +
+        `Trades: ${botState.stats.trades} | Wins: ${botState.stats.wins}`,
         'error'
     );
 }
