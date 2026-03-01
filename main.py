@@ -18,7 +18,7 @@ HTML = """
         .header { background: #1e1e2a; padding: 24px 32px; border-bottom: 1px solid #2a2a35; }
         .header h1 { color: white; font-size: 24px; font-weight: 600; }
         .header p { color: #8888a0; font-size: 14px; margin-top: 4px; }
-        .market-bar { background: #0f0f14; padding: 16px 32px; border-bottom: 1px solid #2a2a35; display: flex; gap: 48px; }
+        .market-bar { background: #0f0f14; padding: 16px 32px; border-bottom: 1px solid #2a2a35; display: flex; gap: 48px; flex-wrap: wrap; }
         .market-item { display: flex; flex-direction: column; gap: 4px; }
         .market-label { color: #6a6a7e; font-size: 11px; text-transform: uppercase; }
         .market-value { color: white; font-size: 18px; font-weight: 500; }
@@ -44,7 +44,14 @@ HTML = """
         .bar.target { background: linear-gradient(180deg, #ffaa00 0%, #ff8800 100%); box-shadow: 0 0 15px #ffaa00; }
         .bar-percent { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); color: white; font-size: 11px; font-weight: 600; background: #1e1e2a; padding: 2px 6px; border-radius: 4px; border: 1px solid #2a2a35; white-space: nowrap; }
         .bar-label { margin-top: 8px; color: white; font-size: 12px; font-weight: 500; }
-        .trading-panel { padding: 24px; background: #0f0f14; }
+
+        /* ── HISTÓRICO DE DÍGITOS ── */
+        .digit-history-section { margin-top: 20px; background: #14141c; border-radius: 12px; padding: 16px 20px; border: 1px solid #2a2a35; }
+        .dh-title { color: #8888a0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; }
+        .dh-grid { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-height: 36px; }
+        .dh-empty { color: #4a4a5a; font-size: 12px; }
+
+        .trading-panel { padding: 24px; background: #0f0f14; overflow-y: auto; }
         .price-box { background: #1a1a24; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 20px; border: 1px solid #2a2a35; }
         .price-label { color: #8a8a9e; font-size: 11px; margin-bottom: 8px; text-transform: uppercase; }
         .price-value { color: white; font-size: 42px; font-weight: 700; font-family: 'Courier New', monospace; }
@@ -57,14 +64,22 @@ HTML = """
         .counter-value { color: #ffaa00; font-size: 24px; font-weight: 700; }
         .balance-box { background: #1a1a24; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #2a2a35; display: flex; justify-content: space-between; align-items: center; }
         .balance-label { color: #8a8a9e; font-size: 12px; }
-        .balance-value { color: #4caf50; font-size: 20px; font-weight: 700; }
-        .profit-box { background: #1a1a24; border-radius: 12px; padding: 16px; margin-bottom: 20px; border: 1px solid #2a2a35; }
+        .balance-value { color: #4caf50; font-size: 20px; font-weight: 700; transition: color 0.3s; }
+        .profit-box { background: #1a1a24; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #2a2a35; }
         .profit-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2a35; }
         .profit-row:last-child { border-bottom: none; }
         .profit-label { color: #8a8a9e; font-size: 13px; }
         .profit-value { color: white; font-weight: 600; }
         .profit-positive { color: #4caf50; }
         .profit-negative { color: #ff4444; }
+
+        /* ── ALERTAS DE SALDO ── */
+        .balance-alert-box { border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 12px; font-weight: 600; display: none; border-left: 4px solid; }
+        .balance-alert-box.level-warning  { background: #1a1400; border-color: #ffaa00; color: #ffaa00; }
+        .balance-alert-box.level-danger   { background: #1a0d00; border-color: #ff8800; color: #ff8800; }
+        .balance-alert-box.level-critical { background: #1a0000; border-color: #ff4444; color: #ff4444; }
+        .gales-left-indicator { margin-top: 6px; font-size: 11px; opacity: 0.8; }
+
         .config-box { background: #1a1a24; border-radius: 12px; padding: 20px; border: 1px solid #2a2a35; }
         .config-title { color: white; font-size: 14px; font-weight: 600; margin-bottom: 16px; }
         .config-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -124,6 +139,7 @@ HTML = """
     </div>
 
     <div class="main-grid">
+        <!-- ══════════════ PAINEL ESQUERDO ══════════════ -->
         <div class="chart-panel">
             <div class="chart-header">
                 <div class="chart-title">📊 Frequência dos Dígitos 1-9 — Últimos 25 ticks</div>
@@ -147,8 +163,17 @@ HTML = """
                     </div>
                 </div>
             </div>
+
+            <!-- ── HISTÓRICO DOS ÚLTIMOS 25 DÍGITOS ── -->
+            <div class="digit-history-section">
+                <div class="dh-title">📜 Histórico — Últimos 25 Dígitos (esquerda = mais antigo · direita = mais recente)</div>
+                <div class="dh-grid" id="digitHistory">
+                    <span class="dh-empty">Aguardando ticks...</span>
+                </div>
+            </div>
         </div>
 
+        <!-- ══════════════ PAINEL DIREITO ══════════════ -->
         <div class="trading-panel">
             <div class="balance-box">
                 <div>
@@ -202,6 +227,12 @@ HTML = """
                 </div>
             </div>
 
+            <!-- ── ALERTA DE SALDO ── -->
+            <div class="balance-alert-box" id="balanceAlertBox">
+                <div id="balanceAlertMsg"></div>
+                <div class="gales-left-indicator" id="galesLeftMsg"></div>
+            </div>
+
             <div class="warning-box" id="warningBox">
                 ⚠️ <strong>ATENÇÃO:</strong> Conta REAL detectada! Operações com dinheiro real.
             </div>
@@ -250,11 +281,24 @@ HTML = """
 const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=1089';
 const SYMBOL       = 'R_100';
 
-let ws                = null;
-let reconnectTimer    = null;
-let heartbeatInterval = null;
+// Cores por dígito para o histórico visual
+const DIGIT_COLORS = ['', '#e74c3c','#e67e22','#f1c40f','#27ae60','#16a085','#2980b9','#8e44ad','#d81b60','#795548'];
+
+let ws                 = null;
+let reconnectTimer     = null;
+let heartbeatInterval  = null;
 let connectionAttempts = 0;
-const MAX_RECONNECT   = 5;
+const MAX_RECONNECT    = 5;
+
+// ================================================================
+// RASTREAMENTO DE CONTRATOS (substitui o filtro simples por ID)
+// ================================================================
+// activeContractIds   — contratos abertos aguardando POC final
+// tickResolvedContracts — contratos cujo resultado já foi tratado
+//                         pelo tick handler (WIN ou LOSS)
+//                         → POC desses contratos só faz update financeiro
+let activeContractIds     = new Set();
+let tickResolvedContracts = new Set();
 
 // ================================================================
 // ESTADO GLOBAL
@@ -269,8 +313,8 @@ let botState = {
     balance:         0,
 
     // Análise de dígitos
-    tickHistory:     [],
-    frequencies:     Array(10).fill(0),
+    tickHistory:  [],
+    frequencies:  Array(10).fill(0),
 
     // Fluxo de entrada
     targetDigit:     null,
@@ -279,15 +323,14 @@ let botState = {
     analysisStarted: false,
 
     // Contrato ativo
-    inPosition:         false,
-    currentContractId:  null,
-    currentTradeDigit:  null,
+    inPosition:        false,
+    currentContractId: null,
+    currentTradeDigit: null,
 
-    // ── MÁQUINA DE ESTADOS TICK-A-TICK ────────────────────────
+    // Máquina de estados tick-a-tick
     waitingForResultTick:   false,
     pendingMartingale:      false,
     galeAppliedForContract: false,
-    // ──────────────────────────────────────────────────────────
 
     // Proposal → Buy
     pendingProposalId: null,
@@ -316,7 +359,7 @@ let analysisTimer     = null;
 // GRÁFICO DE BARRAS
 // ================================================================
 function initBars() {
-    let c = document.getElementById('barsContainer');
+    let c    = document.getElementById('barsContainer');
     let html = '';
     for(let i = 1; i <= 9; i++) {
         html += `<div class="bar-wrapper">
@@ -343,6 +386,67 @@ function updateBars() {
 }
 
 // ================================================================
+// HISTÓRICO DOS ÚLTIMOS 25 DÍGITOS
+// ================================================================
+function updateDigitHistory() {
+    let container = document.getElementById('digitHistory');
+    if(!container) return;
+
+    let history = botState.tickHistory;
+    if(history.length === 0) {
+        container.innerHTML = '<span class="dh-empty">Aguardando ticks...</span>';
+        return;
+    }
+
+    let html = '';
+    for(let i = 0; i < history.length; i++) {
+        let d        = history[i];
+        let isTarget = (d === botState.targetDigit);
+        let isLatest = (i === history.length - 1);
+
+        // Estilo base
+        let bg     = isTarget ? '#2a1800' : '#111118';
+        let color  = isTarget ? '#ffaa00' : (DIGIT_COLORS[d] || '#aaa');
+        let border, shadow, transform, size;
+
+        if(isLatest && isTarget) {
+            border    = '2px solid #ffaa00';
+            shadow    = '0 0 14px rgba(255,170,0,0.7)';
+            transform = 'scale(1.25)';
+            size      = '15px';
+        } else if(isLatest) {
+            border    = '2px solid #ffffff';
+            shadow    = '0 0 10px rgba(255,255,255,0.4)';
+            transform = 'scale(1.2)';
+            size      = '15px';
+            color     = '#ffffff';
+        } else if(isTarget) {
+            border    = '1px solid #ffaa00';
+            shadow    = '0 0 6px rgba(255,170,0,0.4)';
+            transform = 'scale(1)';
+            size      = '13px';
+        } else {
+            border    = '1px solid #2a2a35';
+            shadow    = 'none';
+            transform = 'scale(1)';
+            size      = '13px';
+        }
+
+        html += `<div style="
+            width:30px;height:30px;border-radius:6px;
+            display:inline-flex;align-items:center;justify-content:center;
+            font-size:${size};font-weight:700;
+            background:${bg};color:${color};
+            border:${border};box-shadow:${shadow};
+            transform:${transform};
+            margin:3px 2px;transition:all 0.15s;
+            position:relative;z-index:${isLatest?2:1};
+        " title="Posição ${i+1} de ${history.length}">${d}</div>`;
+    }
+    container.innerHTML = html;
+}
+
+// ================================================================
 // LOG
 // ================================================================
 function addLog(msg, type = 'info') {
@@ -357,7 +461,7 @@ function addLog(msg, type = 'info') {
 }
 
 // ================================================================
-// UI
+// UI — STATS
 // ================================================================
 function updateStats() {
     let p  = botState.stats.profit;
@@ -369,13 +473,100 @@ function updateStats() {
     document.getElementById('tradeCount').innerHTML   = botState.stats.trades;
 }
 
+// ================================================================
+// UI — SALDO (com cor dinâmica)
+// ================================================================
 function updateBalance(balance, currency) {
     botState.balance  = balance;
     botState.currency = currency;
-    document.getElementById('accountBalance').innerHTML =
-        parseFloat(balance).toFixed(2) + ' ' + currency;
+    let el = document.getElementById('accountBalance');
+    el.innerHTML = parseFloat(balance).toFixed(2) + ' ' + currency;
+
+    // Cor dinâmica por nível de saldo
+    let stake = botState.stats.currentStake || botState.config.stake;
+    if(balance < stake) {
+        el.style.color = '#ff4444';        // crítico
+    } else if(balance < stake * 3) {
+        el.style.color = '#ff8800';        // perigo
+    } else if(balance < stake * 6) {
+        el.style.color = '#ffaa00';        // atenção
+    } else {
+        el.style.color = '#4caf50';        // ok
+    }
 }
 
+// ================================================================
+// VALIDAÇÃO E ALERTAS DE SALDO
+// ================================================================
+function calcGalesLeft(stake) {
+    let projStake = stake;
+    let remaining = botState.balance - stake;
+    let gales     = 0;
+    while(remaining >= parseFloat((projStake * botState.config.gale).toFixed(2)) && gales < 50) {
+        projStake  = parseFloat((projStake * botState.config.gale).toFixed(2));
+        remaining -= projStake;
+        gales++;
+    }
+    return gales;
+}
+
+function showBalanceAlert(level, msg, sub) {
+    let box    = document.getElementById('balanceAlertBox');
+    let msgEl  = document.getElementById('balanceAlertMsg');
+    let subEl  = document.getElementById('galesLeftMsg');
+    box.className   = `balance-alert-box level-${level}`;
+    box.style.display = 'block';
+    msgEl.innerHTML = msg;
+    subEl.innerHTML = sub || '';
+}
+
+function hideBalanceAlert() {
+    let box = document.getElementById('balanceAlertBox');
+    if(box) box.style.display = 'none';
+}
+
+// Retorna false se não há saldo para a stake. Exibe alertas contextuais.
+function checkBalanceForTrade(stake) {
+    let nextGaleStake = parseFloat((stake * botState.config.gale).toFixed(2));
+
+    // ── CRÍTICO: saldo abaixo da stake atual ──────────────────
+    if(botState.balance < stake) {
+        let msg = `🚫 SALDO INSUFICIENTE!  Saldo: $${botState.balance.toFixed(2)} | ` +
+                  `Stake necessária: $${stake.toFixed(2)}`;
+        addLog(msg + ' | Bot encerrado!', 'error');
+        showBalanceAlert('critical', msg, '⛔ Impossível continuar. Bot parado automaticamente.');
+        return false;
+    }
+
+    let galesLeft = calcGalesLeft(stake);
+
+    // ── PERIGO: sem saldo para sequer 1 Gale ─────────────────
+    if(galesLeft === 0) {
+        let msg = `🔴 SALDO CRÍTICO!  Saldo: $${botState.balance.toFixed(2)} | ` +
+                  `Esta é a última operação possível.`;
+        addLog(msg + ` | Próximo Gale ($${nextGaleStake.toFixed(2)}) impossível.`, 'warning');
+        showBalanceAlert('danger', msg,
+            `⚠️ Após este trade NÃO haverá saldo para Gale ($${nextGaleStake.toFixed(2)}).`);
+
+    // ── ATENÇÃO: poucos Gales restantes ──────────────────────
+    } else if(galesLeft <= 3) {
+        let msg = `⚠️ SALDO BAIXO!  Saldo: $${botState.balance.toFixed(2)} | ` +
+                  `Apenas ${galesLeft} Gale(s) possível(is).`;
+        addLog(msg, 'warning');
+        showBalanceAlert('warning', msg,
+            `💡 Considere reduzir a stake inicial ou parar o bot.`);
+
+    // ── OK: saldo suficiente ──────────────────────────────────
+    } else {
+        hideBalanceAlert();
+    }
+
+    return true;
+}
+
+// ================================================================
+// UI — STATUS DE CONEXÃO
+// ================================================================
 function updateConnectionStatus(status) {
     let badge = document.getElementById('statusBadge');
     let text  = document.getElementById('statusText');
@@ -517,6 +708,7 @@ function establishConnection() {
                 botState.tickHistory.push(digit);
                 if(botState.tickHistory.length > 25) botState.tickHistory.shift();
                 calculateFrequencies();
+                updateDigitHistory();  // ← atualiza painel de histórico
 
                 // ════════════════════════════════════════════════
                 // PRIORIDADE 1 ── TICK DE RESULTADO DO CONTRATO
@@ -525,9 +717,11 @@ function establishConnection() {
                     botState.waitingForResultTick = false;
 
                     if(digit === botState.currentTradeDigit) {
+                        // ✅ WIN — registra no set; reset completo virá via POC
+                        tickResolvedContracts.add(botState.currentContractId);
                         addLog(
                             `🎯 [TICK WIN] Dígito ${digit} acertou! ` +
-                            `Aguardando confirmação do contrato...`,
+                            `Aguardando confirmação financeira (POC)...`,
                             'success'
                         );
                         document.getElementById('predictionStatus').innerHTML =
@@ -535,6 +729,9 @@ function establishConnection() {
                         botState.inPosition = false;
 
                     } else {
+                        // ❌ LOSS — aplica gale e registra no set
+                        tickResolvedContracts.add(botState.currentContractId);
+
                         if(!botState.galeAppliedForContract) {
                             botState.galeAppliedForContract = true;
                             botState.stats.currentStake = parseFloat(
@@ -555,10 +752,10 @@ function establishConnection() {
                         );
                         document.getElementById('predictionStatus').innerHTML =
                             `⏳ LOSS — Gale #${botState.stats.galeCount} no próximo tick...`;
-                        document.getElementById('lastResult').innerHTML  = `❌ Gale #${botState.stats.galeCount}`;
+                        document.getElementById('lastResult').innerHTML   = `❌ Gale #${botState.stats.galeCount}`;
                         document.getElementById('lastResult').style.color = '#f44336';
                     }
-                    return;
+                    return; // encerra processamento deste tick
                 }
 
                 // ════════════════════════════════════════════════
@@ -619,9 +816,11 @@ function establishConnection() {
             }
             let buy = data.buy;
 
+            // Registra o novo contrato nos dois rastreadores
             botState.currentContractId      = buy.contract_id;
             botState.waitingForResultTick   = true;
             botState.galeAppliedForContract = false;
+            activeContractIds.add(buy.contract_id);   // ← rastreia para POC
 
             addLog(
                 `✅ [BUY OK] Contrato: ${buy.contract_id} | ` +
@@ -635,49 +834,135 @@ function establishConnection() {
         }
 
         // ── PROPOSAL_OPEN_CONTRACT ───────────────────────────────
+        // Lógica corrigida com rastreamento por Set de contratos.
+        // ════════════════════════════════════════════════════════
+        // REGRAS:
+        //  1. Se poc.contract_id NÃO está em activeContractIds
+        //     → completamente stale (pós-WIN/stopBot) — IGNORAR
+        //  2. Se poc.contract_id ESTÁ em tickResolvedContracts
+        //     → resultado já tratado pelo tick handler
+        //     → apenas atualiza financeiro, NÃO altera estado/gale
+        //  3. Caso contrário (POC chegou antes do tick)
+        //     → processamento completo (gale/win aqui)
+        // ════════════════════════════════════════════════════════
         if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
             let poc = data.proposal_open_contract;
             if(!poc.is_sold) return;
 
-            // ════════════════════════════════════════════════════
-            // 🛡️ GUARDA ANTI-STALE: ignora POC de contratos que
-            // não correspondem ao contrato atual. Isso evita que
-            // mensagens atrasadas da API (de contratos anteriores)
-            // acionem Martingale com currentTradeDigit = null após
-            // um WIN + reset de estado.
-            // ════════════════════════════════════════════════════
-            if(!botState.currentContractId || poc.contract_id !== botState.currentContractId) {
+            // ── REGRA 1: stale total (não está nos contratos ativos) ──
+            if(!activeContractIds.has(poc.contract_id)) {
                 addLog(
-                    `⚠️ [POC IGNORADO] Contrato stale/desconhecido: ${poc.contract_id} ` +
-                    `(esperado: ${botState.currentContractId || 'nenhum'})`,
+                    `⚠️ [POC STALE IGNORADO] ID: ${poc.contract_id} ` +
+                    `(não pertence a nenhum contrato ativo desta sessão)`,
                     'warning'
                 );
                 return;
             }
-            // ════════════════════════════════════════════════════
 
-            let profit = parseFloat(poc.profit);
-            let isWin  = profit > 0;
+            // Consome do set (não processa POC duplo para o mesmo contrato)
+            activeContractIds.delete(poc.contract_id);
 
+            let profit             = parseFloat(poc.profit);
+            let isWin              = profit > 0;
+            let resolvedByTick     = tickResolvedContracts.has(poc.contract_id);
+            if(resolvedByTick) tickResolvedContracts.delete(poc.contract_id);
+
+            // Sempre atualiza estatísticas e saldo
             botState.stats.trades++;
             botState.stats.profit += profit;
             if(isWin) botState.stats.wins++;
             if(poc.balance_after) updateBalance(poc.balance_after, botState.currency);
+            updateStats();
 
-            // ── WIN ─────────────────────────────────────────────
+            // ── REGRA 2: resultado já tratado pelo tick ───────────
+            // (inclui o caso do Gale: old contract POC chegando após
+            //  o novo contrato já ter sido aberto)
+            if(resolvedByTick) {
+                if(isWin) {
+                    // ✅ Confirmação financeira do WIN já detectado no tick
+                    addLog(
+                        `💰 [POC WIN ✓] +$${profit.toFixed(2)} confirmado | ` +
+                        `Sessão: $${botState.stats.profit.toFixed(2)} | ` +
+                        `Saldo: ${botState.balance} ${botState.currency}`,
+                        'success'
+                    );
+                    document.getElementById('lastResult').innerHTML   = `✅ +$${profit.toFixed(2)}`;
+                    document.getElementById('lastResult').style.color = '#4caf50';
+
+                    // ── Reset completo e pausa pós-WIN ─────────────
+                    activeContractIds.clear();
+                    tickResolvedContracts.clear();
+                    botState.inPosition             = false;
+                    botState.currentContractId      = null;
+                    botState.targetDigit            = null;
+                    botState.currentTradeDigit      = null;
+                    botState.entryTriggered         = false;
+                    botState.waitingFor8pct         = false;
+                    botState.pendingProposalId      = null;
+                    botState.pendingStake           = 0;
+                    botState.waitingForResultTick   = false;
+                    botState.pendingMartingale      = false;
+                    botState.galeAppliedForContract = false;
+                    botState.stats.currentStake     = botState.config.stake;
+                    botState.stats.galeCount        = 0;
+
+                    document.getElementById('predictionDigit').innerHTML  = '-';
+                    document.getElementById('predictionStatus').innerHTML = 'Aguardando nova análise...';
+                    document.getElementById('targetInfo').style.display   = 'none';
+                    hideBalanceAlert();
+
+                    if(botState.stats.profit >= botState.config.stopWin) {
+                        addLog('🎉 STOP WIN ATINGIDO! Encerrando bot.', 'success');
+                        stopBot(); return;
+                    }
+
+                    addLog('⏱️ WIN! Pausa de 5s antes da próxima análise...', 'info');
+                    botState.running = false;
+                    setTimeout(() => {
+                        if(botState.connected) {
+                            botState.running         = true;
+                            botState.analysisStarted = true;
+                            addLog('🔍 Retomando análise de dígitos...', 'info');
+                            document.getElementById('predictionStatus').innerHTML = 'Analisando dígitos...';
+                        }
+                    }, 5000);
+
+                } else {
+                    // ❌ Confirmação financeira do LOSS já tratado pelo tick
+                    // NÃO altera galeCount nem pendingMartingale (tick já fez)
+                    addLog(
+                        `❌ [POC LOSS ✓] -$${Math.abs(profit).toFixed(2)} confirmado | ` +
+                        `Sessão: $${botState.stats.profit.toFixed(2)} | ` +
+                        `Saldo: ${botState.balance} ${botState.currency}`,
+                        'error'
+                    );
+                    // Verifica stop loss
+                    if(botState.stats.profit <= -botState.config.stopLoss) {
+                        addLog('🛑 STOP LOSS ATINGIDO! Encerrando.', 'error');
+                        botState.pendingMartingale = false;
+                        stopBot(); return;
+                    }
+                }
+                return; // processamento financeiro concluído
+            }
+
+            // ── REGRA 3: POC chegou ANTES do tick de resultado ───
             if(isWin) {
+                // ✅ WIN via POC (raro: poc antes do tick)
                 addLog(
-                    `💰 [POC WIN] +$${profit.toFixed(2)} | ` +
+                    `💰 [POC WIN — poc primeiro] +$${profit.toFixed(2)} | ` +
                     `Sessão: $${botState.stats.profit.toFixed(2)} | ` +
                     `Saldo: ${botState.balance} ${botState.currency}`,
                     'success'
                 );
-                document.getElementById('lastResult').innerHTML  = `✅ +$${profit.toFixed(2)}`;
+                document.getElementById('lastResult').innerHTML   = `✅ +$${profit.toFixed(2)}`;
                 document.getElementById('lastResult').style.color = '#4caf50';
 
                 // Reset completo
+                activeContractIds.clear();
+                tickResolvedContracts.clear();
                 botState.inPosition             = false;
-                botState.currentContractId      = null;  // ← null impede POC stale futuros
+                botState.currentContractId      = null;
                 botState.targetDigit            = null;
                 botState.currentTradeDigit      = null;
                 botState.entryTriggered         = false;
@@ -693,12 +978,11 @@ function establishConnection() {
                 document.getElementById('predictionDigit').innerHTML  = '-';
                 document.getElementById('predictionStatus').innerHTML = 'Aguardando nova análise...';
                 document.getElementById('targetInfo').style.display   = 'none';
-                updateStats();
+                hideBalanceAlert();
 
                 if(botState.stats.profit >= botState.config.stopWin) {
                     addLog('🎉 STOP WIN ATINGIDO! Encerrando bot.', 'success');
-                    stopBot();
-                    return;
+                    stopBot(); return;
                 }
 
                 addLog('⏱️ WIN! Pausa de 5s antes da próxima análise...', 'info');
@@ -712,8 +996,8 @@ function establishConnection() {
                     }
                 }, 5000);
 
-            // ── LOSS ─────────────────────────────────────────────
             } else {
+                // ❌ LOSS via POC (poc chegou antes do tick)
                 if(!botState.galeAppliedForContract) {
                     botState.galeAppliedForContract = true;
                     botState.stats.currentStake = parseFloat(
@@ -731,24 +1015,23 @@ function establishConnection() {
                         `⏳ Aguardando próximo tick...`,
                         'error'
                     );
-                    document.getElementById('lastResult').innerHTML  = `❌ Gale #${botState.stats.galeCount}`;
+                    document.getElementById('lastResult').innerHTML   = `❌ Gale #${botState.stats.galeCount}`;
                     document.getElementById('lastResult').style.color = '#f44336';
+                    document.getElementById('predictionStatus').innerHTML =
+                        `⏳ LOSS — Gale #${botState.stats.galeCount} no próximo tick...`;
                 } else {
                     addLog(
                         `❌ [POC LOSS] -$${Math.abs(profit).toFixed(2)} | ` +
                         `Sessão: $${botState.stats.profit.toFixed(2)} | ` +
-                        `Saldo: ${botState.balance} ${botState.currency} | ` +
-                        `Gale #${botState.stats.galeCount} — próximo tick...`,
+                        `Gale #${botState.stats.galeCount}`,
                         'error'
                     );
                 }
-                updateStats();
 
                 if(botState.stats.profit <= -botState.config.stopLoss) {
                     addLog('🛑 STOP LOSS ATINGIDO! Cancelando martingale. Encerrando.', 'error');
                     botState.pendingMartingale = false;
-                    stopBot();
-                    return;
+                    stopBot(); return;
                 }
             }
         }
@@ -794,9 +1077,15 @@ function startHeartbeat() {
 }
 
 // ================================================================
-// ETAPA 1 — PROPOSAL
+// ETAPA 1 — PROPOSAL  (com validação de saldo)
 // ================================================================
 function sendProposal(digit, stake) {
+    // ── Validação de saldo antes de qualquer operação ──────────
+    if(!checkBalanceForTrade(stake)) {
+        stopBot();
+        return;
+    }
+
     if(!ws || ws.readyState !== WebSocket.OPEN) {
         addLog('❌ WebSocket fechado. Não foi possível enviar proposta.', 'error');
         botState.inPosition     = false;
@@ -823,7 +1112,8 @@ function sendProposal(digit, stake) {
     }));
 
     addLog(
-        `📋 [PROPOSAL] Dígito: ${digit} | Stake: $${stake.toFixed(2)}`,
+        `📋 [PROPOSAL] Dígito: ${digit} | Stake: $${stake.toFixed(2)} | ` +
+        `Saldo: $${botState.balance.toFixed(2)}`,
         'info'
     );
     document.getElementById('predictionStatus').innerHTML = '⏳ Obtendo cotação...';
@@ -866,8 +1156,8 @@ function executeStrategy() {
             if(botState.frequencies[i] < 0.5) { zeroDigit = i; break; }
         }
         if(zeroDigit !== null) {
-            botState.targetDigit    = zeroDigit;
-            botState.waitingFor8pct = true;
+            botState.targetDigit     = zeroDigit;
+            botState.waitingFor8pct  = true;
             botState.stats.galeCount = 0;
 
             document.getElementById('predictionDigit').innerHTML = zeroDigit;
@@ -878,6 +1168,7 @@ function executeStrategy() {
                 `🎯 Dígito ${zeroDigit} (0%) — Aguardando atingir 8%`;
 
             addLog(`🎯 Dígito alvo: ${zeroDigit} (0%) — Aguardando 8%...`, 'warning');
+            updateDigitHistory(); // destaca novo alvo no histórico
         }
     }
 
@@ -954,6 +1245,10 @@ function stopBot() {
     botState.pendingMartingale      = false;
     botState.galeAppliedForContract = false;
     botState.currentContractId      = null;
+
+    // Limpa sets de rastreamento (impede POC stale após parada)
+    activeContractIds.clear();
+    tickResolvedContracts.clear();
 
     if(countdownInterval)  clearInterval(countdownInterval);
     if(analysisTimer)      clearTimeout(analysisTimer);
