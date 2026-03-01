@@ -284,11 +284,9 @@ let botState = {
     currentTradeDigit:  null,
 
     // ── MÁQUINA DE ESTADOS TICK-A-TICK ────────────────────────
-    // Após BUY confirmado: o PRÓXIMO tick é o tick de resultado.
-    // Após LOSS no tick: o PRÓXIMO tick dispara o Martingale.
-    waitingForResultTick:   false,  // true = aguarda tick de resultado
-    pendingMartingale:      false,  // true = dispara Gale no próximo tick
-    galeAppliedForContract: false,  // evita duplo cálculo de gale (tick x poc)
+    waitingForResultTick:   false,
+    pendingMartingale:      false,
+    galeAppliedForContract: false,
     // ──────────────────────────────────────────────────────────
 
     // Proposal → Buy
@@ -522,13 +520,11 @@ function establishConnection() {
 
                 // ════════════════════════════════════════════════
                 // PRIORIDADE 1 ── TICK DE RESULTADO DO CONTRATO
-                // Detecta WIN/LOSS direto do tick, sem esperar poc
                 // ════════════════════════════════════════════════
                 if(botState.waitingForResultTick && botState.currentContractId) {
                     botState.waitingForResultTick = false;
 
                     if(digit === botState.currentTradeDigit) {
-                        // ✅ WIN detectado no tick
                         addLog(
                             `🎯 [TICK WIN] Dígito ${digit} acertou! ` +
                             `Aguardando confirmação do contrato...`,
@@ -537,11 +533,8 @@ function establishConnection() {
                         document.getElementById('predictionStatus').innerHTML =
                             '💰 WIN detectado! Confirmando saldo...';
                         botState.inPosition = false;
-                        // Reset completo virá via proposal_open_contract
 
                     } else {
-                        // ❌ LOSS detectado no tick
-                        // Aplica gale UMA vez (flag galeAppliedForContract)
                         if(!botState.galeAppliedForContract) {
                             botState.galeAppliedForContract = true;
                             botState.stats.currentStake = parseFloat(
@@ -565,13 +558,11 @@ function establishConnection() {
                         document.getElementById('lastResult').innerHTML  = `❌ Gale #${botState.stats.galeCount}`;
                         document.getElementById('lastResult').style.color = '#f44336';
                     }
-                    return; // encerra processamento deste tick
+                    return;
                 }
 
                 // ════════════════════════════════════════════════
                 // PRIORIDADE 2 ── MARTINGALE NO PRÓXIMO TICK
-                // Este é o tick imediatamente após o LOSS.
-                // Dispara a nova compra agora.
                 // ════════════════════════════════════════════════
                 if(botState.running && botState.pendingMartingale && !botState.inPosition) {
                     botState.pendingMartingale = false;
@@ -585,7 +576,7 @@ function establishConnection() {
                     document.getElementById('predictionStatus').innerHTML =
                         `🔄 Gale #${botState.stats.galeCount} — Enviando proposta...`;
                     sendProposal(botState.currentTradeDigit, botState.stats.currentStake);
-                    return; // encerra processamento deste tick
+                    return;
                 }
 
                 // ════════════════════════════════════════════════
@@ -597,7 +588,7 @@ function establishConnection() {
             }
         }
 
-        // ── PROPOSAL — cotação recebida ──────────────────────────
+        // ── PROPOSAL ────────────────────────────────────────────
         if(data.msg_type === 'proposal') {
             if(data.error) {
                 addLog('❌ Erro no proposal: ' + data.error.message, 'error');
@@ -617,7 +608,7 @@ function establishConnection() {
             executeBuy(proposal.id, botState.pendingStake);
         }
 
-        // ── BUY — compra confirmada ──────────────────────────────
+        // ── BUY ─────────────────────────────────────────────────
         if(data.msg_type === 'buy') {
             if(data.error) {
                 addLog('❌ Erro na compra: ' + data.error.message, 'error');
@@ -628,10 +619,9 @@ function establishConnection() {
             }
             let buy = data.buy;
 
-            // ── CENTRAL: ativa a escuta do próximo tick como resultado
             botState.currentContractId      = buy.contract_id;
-            botState.waitingForResultTick   = true;  // ← PRÓXIMO TICK = RESULTADO
-            botState.galeAppliedForContract = false; // reset para este contrato
+            botState.waitingForResultTick   = true;
+            botState.galeAppliedForContract = false;
 
             addLog(
                 `✅ [BUY OK] Contrato: ${buy.contract_id} | ` +
@@ -644,13 +634,27 @@ function establishConnection() {
                 `⏳ Contrato ativo — aguardando próximo tick (resultado)...`;
         }
 
-        // ── PROPOSAL_OPEN_CONTRACT — confirmação financeira ──────
-        // O tick já detectou WIN/LOSS. Aqui apenas:
-        // ✅ WIN  → reset completo + atualiza saldo + pausa 5s
-        // ❌ LOSS → atualiza saldo + verifica stop loss
+        // ── PROPOSAL_OPEN_CONTRACT ───────────────────────────────
         if(data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
-            let poc    = data.proposal_open_contract;
+            let poc = data.proposal_open_contract;
             if(!poc.is_sold) return;
+
+            // ════════════════════════════════════════════════════
+            // 🛡️ GUARDA ANTI-STALE: ignora POC de contratos que
+            // não correspondem ao contrato atual. Isso evita que
+            // mensagens atrasadas da API (de contratos anteriores)
+            // acionem Martingale com currentTradeDigit = null após
+            // um WIN + reset de estado.
+            // ════════════════════════════════════════════════════
+            if(!botState.currentContractId || poc.contract_id !== botState.currentContractId) {
+                addLog(
+                    `⚠️ [POC IGNORADO] Contrato stale/desconhecido: ${poc.contract_id} ` +
+                    `(esperado: ${botState.currentContractId || 'nenhum'})`,
+                    'warning'
+                );
+                return;
+            }
+            // ════════════════════════════════════════════════════
 
             let profit = parseFloat(poc.profit);
             let isWin  = profit > 0;
@@ -673,7 +677,7 @@ function establishConnection() {
 
                 // Reset completo
                 botState.inPosition             = false;
-                botState.currentContractId      = null;
+                botState.currentContractId      = null;  // ← null impede POC stale futuros
                 botState.targetDigit            = null;
                 botState.currentTradeDigit      = null;
                 botState.entryTriggered         = false;
@@ -701,15 +705,15 @@ function establishConnection() {
                 botState.running = false;
                 setTimeout(() => {
                     if(botState.connected) {
-                        botState.running = true;
+                        botState.running         = true;
+                        botState.analysisStarted = true;
                         addLog('🔍 Retomando análise de dígitos...', 'info');
+                        document.getElementById('predictionStatus').innerHTML = 'Analisando dígitos...';
                     }
                 }, 5000);
 
             // ── LOSS ─────────────────────────────────────────────
             } else {
-                // Gale já aplicado no tick handler.
-                // Caso raro (poc chegou antes do tick): aplica gale aqui.
                 if(!botState.galeAppliedForContract) {
                     botState.galeAppliedForContract = true;
                     botState.stats.currentStake = parseFloat(
@@ -740,7 +744,6 @@ function establishConnection() {
                 }
                 updateStats();
 
-                // Verifica Stop Loss — cancela martingale se atingido
                 if(botState.stats.profit <= -botState.config.stopLoss) {
                     addLog('🛑 STOP LOSS ATINGIDO! Cancelando martingale. Encerrando.', 'error');
                     botState.pendingMartingale = false;
@@ -804,8 +807,8 @@ function sendProposal(digit, stake) {
     botState.inPosition             = true;
     botState.currentTradeDigit      = digit;
     botState.pendingStake           = stake;
-    botState.waitingForResultTick   = false; // será true só após buy confirmado
-    botState.galeAppliedForContract = false; // reset para novo contrato
+    botState.waitingForResultTick   = false;
+    botState.galeAppliedForContract = false;
 
     ws.send(JSON.stringify({
         proposal:      1,
@@ -839,7 +842,7 @@ function executeBuy(proposalId, stake) {
     ws.send(JSON.stringify({
         buy:       proposalId,
         price:     parseFloat(stake.toFixed(2)),
-        subscribe: 1   // OBRIGATÓRIO para receber proposal_open_contract
+        subscribe: 1
     }));
 
     addLog(
@@ -950,6 +953,7 @@ function stopBot() {
     botState.waitingForResultTick   = false;
     botState.pendingMartingale      = false;
     botState.galeAppliedForContract = false;
+    botState.currentContractId      = null;
 
     if(countdownInterval)  clearInterval(countdownInterval);
     if(analysisTimer)      clearTimeout(analysisTimer);
